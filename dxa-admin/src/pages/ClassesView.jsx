@@ -22,7 +22,7 @@ function ClassesView() {
         try {
             await api.post('/admin/classes', newClass);
             setNewClass({ title: '', description: '', schedule: '', location: '' });
-            fetchClasses(); // Refresh list
+            fetchClasses();
             alert("Curs creat cu succes!");
         } catch (error) {
             alert("Eroare la crearea cursului!");
@@ -37,6 +37,19 @@ function ClassesView() {
             fetchClasses();
         } catch (error) {
             alert("Nu s-a putut șterge cursul.");
+        }
+    };
+
+    // Toggle Participation
+    const handleToggleParticipation = async (classId, studentId, currentStatus) => {
+        try {
+            // Trimitem opusul statusului curent (!currentStatus)
+            await api.put(`/admin/enrollments/student/${studentId}/class/${classId}/participation?participated=${!currentStatus}`);
+            // Reîncărcăm datele ca să vedem actualizarea
+            fetchClasses(); 
+        } catch (error) {
+            console.error("Eroare la actualizarea prezentei", error);
+            alert("Eroare la actualizare.");
         }
     };
 
@@ -57,16 +70,50 @@ function ClassesView() {
             </div>
 
             {/* Lista Cursuri */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
                 {classes.map(cls => (
-                    <div key={cls.id} style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', borderLeft: '5px solid var(--c-secondary)' }}>
-                        <h3>{cls.title}</h3>
-                        <p style={{ color: '#888', fontSize: '0.9rem' }}>📅 {cls.schedule}</p>
-                        <p style={{ color: '#888', fontSize: '0.9rem' }}>📍 {cls.location}</p>
-                        <p>{cls.description}</p>
-                        <button className="btn btn-danger" style={{ marginTop: '10px', fontSize: '0.8rem', padding: '5px 10px' }} onClick={() => handleDelete(cls.id)}>
-                            Șterge
-                        </button>
+                    <div key={cls.id} style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', borderLeft: '5px solid var(--c-secondary)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                        <div style={{display:'flex', justifyContent:'space-between'}}>
+                            <h3 style={{margin:0}}>{cls.title}</h3>
+                            <button className="btn btn-danger" style={{ fontSize: '0.7rem', padding: '2px 8px' }} onClick={() => handleDelete(cls.id)}>
+                                Șterge Curs
+                            </button>
+                        </div>
+                        <p style={{ color: '#888', fontSize: '0.9rem', marginBottom:'5px' }}>📅 {cls.schedule} | 📍 {cls.location}</p>
+                        <p style={{ fontSize: '0.9rem', fontStyle:'italic' }}>{cls.description}</p>
+                        
+                        <hr style={{ border: '0', borderTop: '1px solid #eee', margin: '15px 0' }} />
+                        
+                        {/* LISTA STUDENȚI ÎNSCRIȘI */}
+                        <h4 style={{fontSize:'0.9rem', color:'var(--c-primary)', marginBottom:'10px'}}>
+                            Studenți Înscriși ({cls.students ? cls.students.length : 0})
+                        </h4>
+                        
+                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                            {cls.students && cls.students.length > 0 ? (
+                                cls.students.map(student => (
+                                    <div key={student.studentId} style={{ 
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+                                        padding: '8px', borderBottom: '1px solid #f9f9f9', fontSize:'0.9rem' 
+                                    }}>
+                                        <span>{student.fullName}</span>
+                                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap:'5px' }}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={student.participated} 
+                                                onChange={() => handleToggleParticipation(cls.id, student.studentId, student.participated)}
+                                                style={{ width: '16px', height: '16px', cursor:'pointer' }}
+                                            />
+                                            <span style={{ fontSize: '0.8rem', color: student.participated ? '#2ecc71' : '#999' }}>
+                                                {student.participated ? 'Prezent' : 'Absent'}
+                                            </span>
+                                        </label>
+                                    </div>
+                                ))
+                            ) : (
+                                <p style={{ fontSize: '0.8rem', color: '#ccc', textAlign: 'center' }}>Niciun student înscris.</p>
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>
