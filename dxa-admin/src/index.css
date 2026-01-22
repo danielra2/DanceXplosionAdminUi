@@ -1,0 +1,47 @@
+:root {
+  --c-primary: #1A1A1A;
+  --c-secondary: #FF7033;
+  --c-background: #F8F8F8;
+  --c-accent: #D4AF37;
+  --c-text-primary: #767676;
+  --c-white: #FFFFFF;
+  --c-danger: #e74c3c; /* Adaugat pentru butoane de stergere */
+  --c-success: #2ecc71;
+}
+
+body {
+  margin: 0;
+  font-family: 'Georgia', serif;
+  background-color: var(--c-background);
+  color: var(--c-primary);
+}
+
+button {
+  font-family: 'Georgia', serif;
+  cursor: pointer;
+}
+
+/* Utilitare */
+.btn {
+  padding: 10px 20px;
+  border-radius: 50px;
+  border: none;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  color: white;
+}
+
+.btn-primary { background-color: var(--c-secondary); }
+.btn-primary:hover { transform: translateY(-2px); background-color: var(--c-primary); }
+
+.btn-danger { background-color: var(--c-danger); }
+.btn-danger:hover { opacity: 0.9; }
+
+.input-field {
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  font-family: 'Georgia', serif;
+}
