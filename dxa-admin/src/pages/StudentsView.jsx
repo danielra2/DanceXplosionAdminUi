@@ -15,7 +15,7 @@ function StudentsView() {
         email: '',
         password: '',
         phone: '',
-        subscriptionExpirationDate: '', // <--- AM ADĂUGAT ÎNAPOI
+        subscriptionExpirationDate: '',
         lastPaymentAmount: '',
         nextPaymentAmount: ''
     });
@@ -36,15 +36,24 @@ function StudentsView() {
 
     // 2. Logică Creare Student
     const handleCreateStudent = async () => {
+        // Validare simplă
         if (!newStudent.firstName || !newStudent.lastName || !newStudent.email || !newStudent.password) {
             alert("Te rog completează câmpurile obligatorii (Nume, Prenume, Email, Parolă)");
             return;
         }
 
+        // Curățăm datele înainte de trimitere (convertim string gol in null)
+        const payload = {
+            ...newStudent,
+            subscriptionExpirationDate: newStudent.subscriptionExpirationDate || null,
+            lastPaymentAmount: newStudent.lastPaymentAmount || null,
+            nextPaymentAmount: newStudent.nextPaymentAmount || null
+        };
+
         try {
-    // Schimbă aici din '/student' în '/users/student'
-    await api.post('/users/student', newStudent); 
-    alert("Student creat cu succes!");
+            // Acum URL-ul din backend (/users/student) se va potrivi cu cel de aici
+            await api.post('/users/student', payload);
+            alert("Student creat cu succes!");
             setIsCreateModalOpen(false);
             setNewStudent({ 
                 firstName: '', lastName: '', email: '', password: '', phone: '', 
@@ -97,7 +106,6 @@ function StudentsView() {
                     <tr>
                         <th style={{ padding: '15px', textAlign: 'left' }}>Nume</th>
                         <th style={{ padding: '15px', textAlign: 'left' }}>Contact</th>
-                        {/* AM PUS ÎNAPOI COLOANA DE STATUS */}
                         <th style={{ padding: '15px', textAlign: 'left' }}>Status</th>
                         <th style={{ padding: '15px', textAlign: 'left' }}>Ultima Plată</th>
                         <th style={{ padding: '15px', textAlign: 'left' }}>De Plată</th>
@@ -115,8 +123,6 @@ function StudentsView() {
                                 <div>{student.email}</div>
                                 <div style={{ fontSize: '0.85rem', color: '#888' }}>{student.phone}</div>
                             </td>
-                            
-                            {/* Coloana Status (Restaurată) */}
                             <td style={{ padding: '15px' }}>
                                 <span style={{ 
                                     padding: '5px 12px', borderRadius: '15px', fontSize: '0.8rem', fontWeight: 'bold',
@@ -130,8 +136,6 @@ function StudentsView() {
                                     </div>
                                 )}
                             </td>
-
-                            {/* Coloane Financiare */}
                             <td style={{ padding: '15px' }}>
                                 <span style={{ color: '#2ecc71', fontWeight: 'bold' }}>
                                     {student.lastPaymentAmount ? `${student.lastPaymentAmount} RON` : '-'}
@@ -142,7 +146,6 @@ function StudentsView() {
                                     {student.nextPaymentAmount ? `${student.nextPaymentAmount} RON` : '-'}
                                 </span>
                             </td>
-                            
                             <td style={{ padding: '15px' }}>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
                                     {student.enrolledClasses && student.enrolledClasses.map(cls => (
@@ -197,7 +200,6 @@ function StudentsView() {
                                 value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} 
                             />
                             
-                            {/* Câmp Data Expirare (Restaurat) */}
                             <div>
                                 <label style={{fontSize:'0.8rem', color:'#666', display:'block', marginBottom:'5px'}}>Expirare Abonament</label>
                                 <input 
@@ -206,7 +208,6 @@ function StudentsView() {
                                 />
                             </div>
 
-                            {/* Câmpuri Financiare */}
                             <input 
                                 className="input-field" placeholder="Platit Luna Trecută (RON)" type="number"
                                 value={newStudent.lastPaymentAmount} onChange={e => setNewStudent({...newStudent, lastPaymentAmount: e.target.value})} 
