@@ -1,0 +1,179 @@
+/* dxa-admin/src/pages/ClassesView.css */
+
+.schedule-section {
+    padding: 20px;
+    text-align: center;
+    background-color: transparent;
+    font-family: 'Georgia', serif !important;
+}
+
+.hall-container {
+    margin-bottom: 60px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+.hall-header {
+    background: var(--c-secondary); /* Folosim variabila din index.css */
+    color: white;
+    padding: 15px;
+    font-size: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin: 0;
+}
+
+.schedule-table-container {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 10px;
+    background: #f1f1f1;
+    padding: 10px;
+    overflow-x: auto; /* Permite scroll orizontal pe ecrane mici */
+}
+
+.day-column {
+    flex: 1;
+    min-width: 160px;
+    background: white;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.day-title {
+    background: var(--c-primary);
+    color: white;
+    padding: 10px 0;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: 8px 8px 0 0;
+}
+
+.class-list {
+    padding: 10px;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* CARDUL DE CURS */
+.class-card {
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
+    padding: 10px;
+    text-align: center;
+    transition: all 0.3s ease;
+    position: relative;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.class-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--c-secondary);
+    box-shadow: 0 5px 15px rgba(255, 112, 51, 0.3);
+}
+
+.class-time {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: var(--c-secondary);
+    margin-bottom: 4px;
+}
+
+.class-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--c-primary);
+    margin: 0 0 5px 0;
+    line-height: 1.2;
+}
+
+.class-instr {
+    display: block;
+    font-size: 0.8rem;
+    color: #666;
+    font-style: italic;
+}
+
+.class-level-tag {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 0.65rem;
+    font-weight: 900;
+    background: #f8f8f8;
+    color: #333;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    border: 1px solid #eee;
+}
+
+.empty-day {
+    color: #ccc;
+    font-size: 0.8rem;
+    padding-top: 40px;
+    font-style: italic;
+}
+
+/* Stiluri pentru Modalul de Studenți */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1100;
+    backdrop-filter: blur(3px);
+}
+
+.modal-content {
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    position: relative;
+}
+
+.modal-close-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #999;
+}
+
+.modal-close-btn:hover {
+    color: var(--c-danger);
+}
+
+@media (max-width: 1024px) {
+    .schedule-table-container {
+        flex-wrap: wrap;
+    }
+    .day-column {
+        min-width: 45%;
+    }
+}
+
+@media (max-width: 600px) {
+    .day-column {
+        min-width: 100%;
+    }
+}

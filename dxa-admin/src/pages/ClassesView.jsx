@@ -1,11 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
+import './ClassesView.css';
 
 function ClassesView() {
     const [classes, setClasses] = useState([]);
-    const [newClass, setNewClass] = useState({ title: '', description: '', schedule: '', location: '' });
+    const [selectedClass, setSelectedClass] = useState(null);
+    const [attendanceList, setAttendanceList] = useState([]); // Lista separata pentru modal
+    
+    // --- NAVIGARE SĂPTĂMÂNALĂ ---
+    const [currentWeekStart, setCurrentWeekStart] = useState(getMonday(new Date()));
 
-    // Fetch Classes
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [newClass, setNewClass] = useState({ 
+        title: '', description: '', scheduleDay: 'Luni', scheduleTime: '18:00', location: 'Sala Mare - 1' 
+    });
+
+    const DAYS = ["Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "Duminică"];
+    const HALLS = ["Sala Mare - 1", "Sala Mare - 2", "Sala Mică"];
+
+    // 1. Fetch Template Cursuri (Orarul General)
     const fetchClasses = async () => {
         try {
             const res = await api.get('/classes');
@@ -17,106 +30,247 @@ function ClassesView() {
 
     useEffect(() => { fetchClasses(); }, []);
 
-    // Create Class
-    const handleCreate = async () => {
+    // 2. Fetch Prezență pentru o Dată Specifică (Când deschidem modalul)
+    const fetchAttendance = async (classId, dateStr) => {
         try {
-            await api.post('/admin/classes', newClass);
-            setNewClass({ title: '', description: '', schedule: '', location: '' });
-            fetchClasses();
-            alert("Curs creat cu succes!");
+            // URL-ul nou din AttendanceController
+            const res = await api.get(`/attendance/class/${classId}?date=${dateStr}`);
+            // Backend-ul returnează obiectul cursului cu lista 'students' populată corect pt data aia
+            setAttendanceList(res.data.students || []);
         } catch (error) {
-            alert("Eroare la crearea cursului!");
+            console.error("Eroare la incarcarea prezenței:", error);
+            setAttendanceList([]);
         }
     };
 
-    // Delete Class
-    const handleDelete = async (id) => {
-        if(!window.confirm("Sigur vrei să ștergi acest curs?")) return;
-        try {
-            await api.delete(`/admin/classes/${id}`);
-            fetchClasses();
-        } catch (error) {
-            alert("Nu s-a putut șterge cursul.");
+    // 3. Gestionare Click pe Curs (Deschide Modalul pt Data Corectă)
+    const handleClassClick = (cls) => {
+        setSelectedClass(cls);
+        
+        // Calculăm data exactă a cursului în funcție de săptămâna selectată
+        const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); // 0 pt Luni, 1 pt Marti...
+        if (dayIndex !== -1) {
+            const specificDate = addDays(currentWeekStart, dayIndex);
+            const formattedDate = formatDateISO(specificDate);
+            // Cerem prezența pentru acea dată
+            fetchAttendance(cls.id, formattedDate);
         }
     };
 
-    // Toggle Participation
-    const handleToggleParticipation = async (classId, studentId, currentStatus) => {
+    // 4. Toggle Prezență
+    const handleToggleParticipation = async (studentId, currentStatus) => {
+        if (!selectedClass) return;
+
+        // Recalculăm data (la fel ca mai sus)
+        const dayIndex = DAYS.indexOf(getDayFromSchedule(selectedClass.schedule));
+        const specificDate = formatDateISO(addDays(currentWeekStart, dayIndex));
+
+        const payload = {
+            studentId: studentId,
+            classId: selectedClass.id,
+            date: specificDate,
+            present: !currentStatus
+        };
+
         try {
-            // Trimitem opusul statusului curent (!currentStatus)
-            await api.put(`/admin/enrollments/student/${studentId}/class/${classId}/participation?participated=${!currentStatus}`);
-            // Reîncărcăm datele ca să vedem actualizarea
-            fetchClasses(); 
+            await api.post('/attendance', payload);
+            
+            // Actualizăm local lista pentru UI rapid
+            setAttendanceList(prev => prev.map(s => 
+                s.studentId === studentId ? { ...s, participated: !currentStatus } : s
+            ));
         } catch (error) {
-            console.error("Eroare la actualizarea prezentei", error);
             alert("Eroare la actualizare.");
         }
     };
 
+    // --- NAVIGARE DATE ---
+    const goToPrevWeek = () => setCurrentWeekStart(addDays(currentWeekStart, -7));
+    const goToNextWeek = () => setCurrentWeekStart(addDays(currentWeekStart, 7));
+    const goToCurrentWeek = () => setCurrentWeekStart(getMonday(new Date()));
+
+    // --- Helpers Utilitare ---
+    function getMonday(d) {
+        d = new Date(d);
+        var day = d.getDay(),
+            diff = d.getDate() - day + (day === 0 ? -6 : 1); // ajustare pt Luni
+        return new Date(d.setDate(diff));
+    }
+
+    function addDays(date, days) {
+        var result = new Date(date);
+        result.setDate(result.getDate() + days);
+        return result;
+    }
+
+    function formatDateISO(date) {
+        return date.toISOString().split('T')[0]; // Returnează YYYY-MM-DD
+    }
+
+    function formatDateRO(date) {
+        return date.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' });
+    }
+
+    function getDayFromSchedule(schedule) {
+        if(!schedule) return "";
+        for (const day of DAYS) {
+            if (schedule.includes(day)) return day;
+        }
+        return "";
+    }
+
+    // --- Helpers Creare / Ștergere (Standard) ---
+    const handleCreate = async () => {
+        const fullSchedule = `${newClass.scheduleDay} ${newClass.scheduleTime}`;
+        try {
+            await api.post('/admin/classes', { ...newClass, schedule: fullSchedule });
+            setIsAddModalOpen(false);
+            fetchClasses();
+            alert("Curs adăugat!");
+        } catch (error) { alert("Eroare la creare!"); }
+    };
+
+    const handleDelete = async (id) => {
+        if(!window.confirm("Ștergi cursul?")) return;
+        try { await api.delete(`/admin/classes/${id}`); setSelectedClass(null); fetchClasses(); } 
+        catch (e) { alert("Eroare la ștergere."); }
+    };
+
+    // --- RENDER ---
+    const weekEnd = addDays(currentWeekStart, 6);
+
     return (
-        <div>
-            <h1>Gestionare Cursuri</h1>
+        <div className="schedule-section">
             
-            {/* Formular Adaugare */}
-            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
-                <h3>Adaugă Curs Nou</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <input className="input-field" placeholder="Titlu (ex: Salsa)" value={newClass.title} onChange={e => setNewClass({...newClass, title: e.target.value})} />
-                    <input className="input-field" placeholder="Program (ex: Luni 19:00)" value={newClass.schedule} onChange={e => setNewClass({...newClass, schedule: e.target.value})} />
-                    <input className="input-field" placeholder="Locatie" value={newClass.location} onChange={e => setNewClass({...newClass, location: e.target.value})} />
-                    <input className="input-field" placeholder="Descriere scurta" value={newClass.description} onChange={e => setNewClass({...newClass, description: e.target.value})} />
+            {/* HEADER NAVIGARE SĂPTĂMÂNĂ */}
+            <div style={{ marginBottom: '30px', display:'flex', flexDirection:'column', alignItems:'center' }}>
+                <h1 style={{margin:0, color:'var(--c-primary)', marginBottom:'15px'}}>Prezență & Orar</h1>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', background:'white', padding:'10px 20px', borderRadius:'50px', boxShadow:'0 2px 10px rgba(0,0,0,0.1)' }}>
+                    <button className="btn" onClick={goToPrevWeek}>&lt;</button>
+                    <div style={{textAlign:'center'}}>
+                        <span style={{display:'block', fontSize:'0.8rem', color:'#888', fontWeight:'bold'}}>SĂPTĂMÂNA</span>
+                        <span style={{fontSize:'1.1rem', fontWeight:'bold', color:'var(--c-secondary)'}}>
+                            {formatDateRO(currentWeekStart)} - {formatDateRO(weekEnd)}
+                        </span>
+                    </div>
+                    <button className="btn" onClick={goToNextWeek}>&gt;</button>
+                    <button className="btn btn-primary" style={{fontSize:'0.8rem', marginLeft:'10px'}} onClick={goToCurrentWeek}>Azi</button>
                 </div>
-                <button className="btn btn-primary" onClick={handleCreate}>Salvează Curs</button>
+
+                <button className="btn btn-primary" style={{ marginTop: '20px' }} onClick={() => setIsAddModalOpen(true)}>
+                    + Adaugă Curs în Orar
+                </button>
             </div>
 
-            {/* Lista Cursuri */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
-                {classes.map(cls => (
-                    <div key={cls.id} style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', borderLeft: '5px solid var(--c-secondary)', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-                        <div style={{display:'flex', justifyContent:'space-between'}}>
-                            <h3 style={{margin:0}}>{cls.title}</h3>
-                            <button className="btn btn-danger" style={{ fontSize: '0.7rem', padding: '2px 8px' }} onClick={() => handleDelete(cls.id)}>
-                                Șterge Curs
-                            </button>
-                        </div>
-                        <p style={{ color: '#888', fontSize: '0.9rem', marginBottom:'5px' }}>📅 {cls.schedule} | 📍 {cls.location}</p>
-                        <p style={{ fontSize: '0.9rem', fontStyle:'italic' }}>{cls.description}</p>
+            {/* TABELE ORAR */}
+            {HALLS.map(hall => (
+                <div key={hall} className="hall-container">
+                    <h3 className="hall-header">{hall}</h3>
+                    <div className="schedule-table-container">
+                        {DAYS.map((day, index) => {
+                            // Calculăm data pentru afișare în antetul coloanei (ex: Luni 12.02)
+                            const currentDayDate = addDays(currentWeekStart, index);
+                            
+                            return (
+                                <div key={day} className="day-column">
+                                    <h4 className="day-title">
+                                        {day} <br/>
+                                        <span style={{fontSize:'0.8rem', fontWeight:'normal', opacity:0.8}}>
+                                            {formatDateRO(currentDayDate)}
+                                        </span>
+                                    </h4>
+                                    <div className="class-list">
+                                        {classes.filter(c => c.location === hall && c.schedule.includes(day))
+                                            .sort((a, b) => a.schedule.localeCompare(b.schedule))
+                                            .map(cls => (
+                                                <div key={cls.id} className="class-card" onClick={() => handleClassClick(cls)}>
+                                                    <span className="class-time">{cls.schedule.replace(day, '').trim()}</span>
+                                                    <p className="class-name">{cls.title}</p>
+                                                    <div style={{fontSize:'0.7rem', color:'#999'}}>Click pentru Prezență</div>
+                                                </div>
+                                            ))
+                                        }
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+
+            {/* MODAL PREZENȚĂ */}
+            {selectedClass && (
+                <div className="modal-overlay" onClick={() => setSelectedClass(null)}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <button className="modal-close-btn" onClick={() => setSelectedClass(null)}>&times;</button>
                         
-                        <hr style={{ border: '0', borderTop: '1px solid #eee', margin: '15px 0' }} />
-                        
-                        {/* LISTA STUDENȚI ÎNSCRIȘI */}
-                        <h4 style={{fontSize:'0.9rem', color:'var(--c-primary)', marginBottom:'10px'}}>
-                            Studenți Înscriși ({cls.students ? cls.students.length : 0})
-                        </h4>
-                        
-                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                            {cls.students && cls.students.length > 0 ? (
-                                cls.students.map(student => (
+                        <h2 style={{color:'var(--c-secondary)', marginBottom:'5px'}}>{selectedClass.title}</h2>
+                        <p style={{fontWeight:'bold', color:'#666', marginBottom:'20px'}}>
+                            {/* Afișăm data exactă pentru care facem prezența */}
+                            Data: {formatDateRO(addDays(currentWeekStart, DAYS.indexOf(getDayFromSchedule(selectedClass.schedule))))}
+                        </p>
+
+                        <div style={{background:'#f9f9f9', padding:'15px', borderRadius:'8px', maxHeight:'400px', overflowY:'auto'}}>
+                            {attendanceList.length > 0 ? (
+                                attendanceList.map(student => (
                                     <div key={student.studentId} style={{ 
                                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-                                        padding: '8px', borderBottom: '1px solid #f9f9f9', fontSize:'0.9rem' 
+                                        padding: '10px', borderBottom: '1px solid #eee', background:'white', marginBottom:'5px', borderRadius:'4px'
                                     }}>
-                                        <span>{student.fullName}</span>
-                                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap:'5px' }}>
+                                        <span style={{fontWeight:'500'}}>{student.fullName}</span>
+                                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap:'8px' }}>
+                                            <span style={{ fontSize: '0.85rem', color: student.participated ? '#2ecc71' : '#ccc', fontWeight:'bold' }}>
+                                                {student.participated ? 'PREZENT' : 'ABSENT'}
+                                            </span>
                                             <input 
                                                 type="checkbox" 
                                                 checked={student.participated} 
-                                                onChange={() => handleToggleParticipation(cls.id, student.studentId, student.participated)}
-                                                style={{ width: '16px', height: '16px', cursor:'pointer' }}
+                                                onChange={() => handleToggleParticipation(student.studentId, student.participated)}
+                                                style={{ width: '20px', height: '20px', cursor:'pointer', accentColor:'#2ecc71' }}
                                             />
-                                            <span style={{ fontSize: '0.8rem', color: student.participated ? '#2ecc71' : '#999' }}>
-                                                {student.participated ? 'Prezent' : 'Absent'}
-                                            </span>
                                         </label>
                                     </div>
                                 ))
                             ) : (
-                                <p style={{ fontSize: '0.8rem', color: '#ccc', textAlign: 'center' }}>Niciun student înscris.</p>
+                                <p style={{textAlign:'center', color:'#999'}}>Nu sunt studenți înscriși.</p>
                             )}
                         </div>
+                        
+                        <div style={{marginTop:'20px', textAlign:'right'}}>
+                             <button className="btn btn-danger" style={{fontSize:'0.8rem'}} onClick={() => handleDelete(selectedClass.id)}>
+                                Șterge Cursul din Orar
+                            </button>
+                        </div>
                     </div>
-                ))}
-            </div>
+                </div>
+            )}
+
+            {/* MODAL ADĂUGARE (Rămâne neschimbat, dar îl includ pt completitudine) */}
+            {isAddModalOpen && (
+                <div className="modal-overlay">
+                    <div className="modal-content" style={{maxWidth:'500px'}}>
+                        <h2 style={{marginBottom:'20px'}}>Adaugă Curs</h2>
+                        <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
+                            <input className="input-field" placeholder="Nume Curs" value={newClass.title} onChange={e => setNewClass({...newClass, title: e.target.value})} />
+                            <input className="input-field" placeholder="Nivel" value={newClass.description} onChange={e => setNewClass({...newClass, description: e.target.value})} />
+                            <select className="input-field" value={newClass.location} onChange={e => setNewClass({...newClass, location: e.target.value})}>
+                                {HALLS.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                            <div style={{display:'flex', gap:'10px'}}>
+                                <select className="input-field" value={newClass.scheduleDay} onChange={e => setNewClass({...newClass, scheduleDay: e.target.value})}>
+                                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                                <input type="time" className="input-field" value={newClass.scheduleTime} onChange={e => setNewClass({...newClass, scheduleTime: e.target.value})} />
+                            </div>
+                            <div style={{display:'flex', justifyContent:'flex-end', gap:'10px'}}>
+                                <button className="btn btn-danger" onClick={() => setIsAddModalOpen(false)}>Anulează</button>
+                                <button className="btn btn-primary" onClick={handleCreate}>Salvează</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
