@@ -418,17 +418,18 @@ const labelStyle = { display:'block', fontSize:'0.8rem', fontWeight:'bold', colo
 const filterBtn = { border:'1px solid #ddd', background:'white', padding:'6px 12px', borderRadius:'20px', cursor:'pointer' };
 const activeFilterBtn = { ...filterBtn, background:'var(--c-primary)', color:'white', borderColor:'var(--c-primary)' };
 
-// 1. Încărcare Date Inițială
+// 1. Încărcare Date Inițială (SEPARATĂ)
     const fetchData = async () => {
-        // Încărcăm Cursurile (pentru dropdown) - Dacă eșuează, nu e critic pt tabel
+        // A. Încercăm să încărcăm Cursurile (pentru filtre/dropdowns)
         try {
             const classesRes = await api.get('/classes');
             setClasses(classesRes.data);
         } catch (error) {
-            console.error("Eroare la incarcarea cursurilor (dar continuăm):", error);
+            console.error("Eroare ne-critică la încărcarea cursurilor:", error);
+            // Nu dăm alert, lăsăm pagina să meargă mai departe
         }
 
-        // Încărcăm Studenții - Asta e critic
+        // B. Încărcăm Studenții (CRITIC) - Aceasta va rula chiar dacă cursurile eșuează
         await fetchFilteredUsers(); 
     };
 
@@ -440,13 +441,16 @@ const activeFilterBtn = { ...filterBtn, background:'var(--c-primary)', color:'wh
             if (filters.status) params.append('status', filters.status);
             if (filters.courseId) params.append('courseId', filters.courseId);
 
-            console.log("Cerere Frontend:", `/users?${params.toString()}`); // Debug
+            console.log("Request Frontend:", `/users?${params.toString()}`); // Debugging în consolă
             
             const response = await api.get(`/users?${params.toString()}`);
-            setStudents(response.data.userList || response.data);
+            // Backend-ul poate returna direct lista sau un obiect { userList: ... }
+            const data = response.data.userList || response.data;
+            
+            setStudents(data);
         } catch (error) {
-            console.error("Eroare CRITICĂ la incarcarea studenților:", error);
-            alert("Nu s-au putut încărca studenții. Verifică Backend-ul.");
+            console.error("Eroare CRITICĂ la încărcarea studenților:", error);
+            alert("Nu pot conecta la Backend pentru studenți. Verifică serverul Java.");
         }
     };
 
