@@ -30,7 +30,7 @@ function ClassesView() {
 
     useEffect(() => { fetchClasses(); }, []);
 
-    // 2. Fetch Prezență pentru o Dată Specifică
+    // 2. Fetch Prezență pentru o Dată Specifică (LOGICĂ FILTRARE PER CURS)
     const fetchAttendance = async (classId, dateStr) => {
         try {
             const res = await api.get(`/attendance/class/${classId}?date=${dateStr}`);
@@ -40,9 +40,9 @@ function ClassesView() {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
-            // Filtrează studenții să apară DOAR între data înscrierii și data expirării
+            // Filtrează studenții să apară DOAR dacă sunt în perioada de înscriere ACTIVĂ pentru acest curs
             const filteredStudents = (res.data.students || []).filter(student => {
-                // Verifică expirare
+                // Verifică dacă există dată de expirare specifică pentru acest curs
                 if (!student.expirationDate) {
                     return false;
                 }
@@ -50,22 +50,19 @@ function ClassesView() {
                 const expirationDate = new Date(student.expirationDate);
                 expirationDate.setHours(23, 59, 59, 999);
                 
-                // Nu arăta studenți pentru clase după expirare
+                // 1. Studentul nu apare dacă cursul este după data lui de expirare
                 if (classDate > expirationDate) {
                     return false;
                 }
                 
-                // Verifică enrollment date (data înscrierii)
+                // 2. Verifică data înscrierii pentru a nu apărea în trecut
                 if (student.enrollmentDate) {
                     const enrollmentDate = new Date(student.enrollmentDate);
                     enrollmentDate.setHours(0, 0, 0, 0);
-                    
-                    // Studentul apare DOAR dacă data clasei este între enrollment și expirare
                     return classDate >= enrollmentDate && classDate <= expirationDate;
                 }
                 
-                // FALLBACK: Dacă nu avem enrollmentDate, studentul apare DOAR de azi înainte
-                // Previne apariția în trecut pentru înscrieri noi fără dată istorică
+                // FALLBACK: Dacă nu avem enrollmentDate, nu îl lăsăm să apară în trecut față de AZI
                 return classDate >= today && classDate <= expirationDate;
             });
             
@@ -187,7 +184,7 @@ function ClassesView() {
                 </button>
             </div>
 
-            {/* TABELE ORAR */}
+            {/* TABELE ORAR - DESIGN ORIGINAL */}
             {HALLS.map(hall => (
                 <div key={hall} className="hall-container">
                     <h3 className="hall-header">{hall}</h3>
@@ -221,7 +218,7 @@ function ClassesView() {
                 </div>
             ))}
 
-            {/* MODAL PREZENȚĂ */}
+            {/* MODAL PREZENȚĂ - DESIGN ORIGINAL CU DATE INDIVIDUALE */}
             {selectedClass && (
                 <div className="modal-overlay" onClick={() => setSelectedClass(null)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -241,6 +238,7 @@ function ClassesView() {
                                     }}>
                                         <div>
                                             <span style={{fontWeight:'500'}}>{student.fullName}</span>
+                                            {/* AFISARE DATA EXPIRARE INDIVIDUALĂ SUB NUME */}
                                             {student.expirationDate && (
                                                 <div style={{fontSize:'0.7rem', color: new Date(student.expirationDate) < new Date() ? '#e74c3c' : '#888'}}>
                                                     Expiră la: {student.expirationDate}
@@ -261,7 +259,7 @@ function ClassesView() {
                                     </div>
                                 ))
                             ) : (
-                                <p style={{textAlign:'center', color:'#999'}}>Nu sunt studenți înscriși sau abonamentele au expirat.</p>
+                                <p style={{textAlign:'center', color:'#999'}}>Nu sunt studenți înscriși activi pentru această dată.</p>
                             )}
                         </div>
                         

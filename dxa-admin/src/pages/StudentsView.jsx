@@ -308,12 +308,26 @@ function StudentsView() {
                                 }}>
                                     {s.status === 'Active' ? 'ABONAMENT ACTIV' : 'EXPIRAT'}
                                 </span>
-                                {s.subscriptionExpirationDate && <div style={{fontSize:'0.75rem', marginTop:'5px', color:'#666'}}>Exp: {s.subscriptionExpirationDate}</div>}
                             </td>
+
                             <td style={{padding:'15px'}}>
-                                <div style={{display:'flex', gap:'5px', flexWrap:'wrap'}}>
+                                <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
                                     {s.enrolledClasses && s.enrolledClasses.length > 0 ? 
-                                        s.enrolledClasses.map(c => <span key={c.id} style={{background:'#f0f0f0', padding:'3px 8px', borderRadius:'4px', fontSize:'0.8rem'}}>{c.title}</span>)
+                                        s.enrolledClasses.map(c => (
+                                            <div key={c.id} style={{
+                                                background:'#f8f9fa', 
+                                                border: '1px solid #ddd', 
+                                                padding:'4px 8px', 
+                                                borderRadius:'6px',
+                                                display: 'flex',
+                                                flexDirection: 'column'
+                                            }}>
+                                                <span style={{fontSize:'0.85rem', fontWeight:'600'}}>{c.title}</span>
+                                                <span style={{fontSize:'0.7rem', color:'#666'}}>
+                                                    Exp: {c.expirationDate || 'Fără dată'}
+                                                </span>
+                                            </div>
+                                        ))
                                         : <span style={{color:'#ccc', fontSize:'0.8rem'}}>-</span>
                                     }
                                 </div>
