@@ -5,7 +5,7 @@ import './ClassesView.css';
 function ClassesView() {
     const [classes, setClasses] = useState([]);
     const [selectedClass, setSelectedClass] = useState(null);
-    const [attendanceList, setAttendanceList] = useState([]); // Lista separata pentru modal
+    const [attendanceList, setAttendanceList] = useState([]); 
     
     // --- NAVIGARE SĂPTĂMÂNALĂ ---
     const [currentWeekStart, setCurrentWeekStart] = useState(getMonday(new Date()));
@@ -30,12 +30,11 @@ function ClassesView() {
 
     useEffect(() => { fetchClasses(); }, []);
 
-    // 2. Fetch Prezență pentru o Dată Specifică (Când deschidem modalul)
+    // 2. Fetch Prezență pentru o Dată Specifică
     const fetchAttendance = async (classId, dateStr) => {
         try {
-            // URL-ul nou din AttendanceController
             const res = await api.get(`/attendance/class/${classId}?date=${dateStr}`);
-            // Backend-ul returnează obiectul cursului cu lista 'students' populată corect pt data aia
+            // Backend-ul returnează ClassStudentDto care acum include expirationDate
             setAttendanceList(res.data.students || []);
         } catch (error) {
             console.error("Eroare la incarcarea prezenței:", error);
@@ -43,25 +42,22 @@ function ClassesView() {
         }
     };
 
-    // 3. Gestionare Click pe Curs (Deschide Modalul pt Data Corectă)
     const handleClassClick = (cls) => {
-        setSelectedClass(cls);
+    setSelectedClass(cls);
+    const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); 
+    if (dayIndex !== -1) {
+        const specificDate = addDays(currentWeekStart, dayIndex);
+        const formattedDate = formatDateISO(specificDate);
         
-        // Calculăm data exactă a cursului în funcție de săptămâna selectată
-        const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); // 0 pt Luni, 1 pt Marti...
-        if (dayIndex !== -1) {
-            const specificDate = addDays(currentWeekStart, dayIndex);
-            const formattedDate = formatDateISO(specificDate);
-            // Cerem prezența pentru acea dată
-            fetchAttendance(cls.id, formattedDate);
-        }
-    };
+        // ACEST APEL TREBUIE SĂ CONȚINĂ DATA CORECTĂ:
+        fetchAttendance(cls.id, formattedDate); 
+    }
+};
 
     // 4. Toggle Prezență
     const handleToggleParticipation = async (studentId, currentStatus) => {
         if (!selectedClass) return;
 
-        // Recalculăm data (la fel ca mai sus)
         const dayIndex = DAYS.indexOf(getDayFromSchedule(selectedClass.schedule));
         const specificDate = formatDateISO(addDays(currentWeekStart, dayIndex));
 
@@ -74,8 +70,6 @@ function ClassesView() {
 
         try {
             await api.post('/attendance', payload);
-            
-            // Actualizăm local lista pentru UI rapid
             setAttendanceList(prev => prev.map(s => 
                 s.studentId === studentId ? { ...s, participated: !currentStatus } : s
             ));
@@ -93,7 +87,7 @@ function ClassesView() {
     function getMonday(d) {
         d = new Date(d);
         var day = d.getDay(),
-            diff = d.getDate() - day + (day === 0 ? -6 : 1); // ajustare pt Luni
+            diff = d.getDate() - day + (day === 0 ? -6 : 1);
         return new Date(d.setDate(diff));
     }
 
@@ -104,7 +98,7 @@ function ClassesView() {
     }
 
     function formatDateISO(date) {
-        return date.toISOString().split('T')[0]; // Returnează YYYY-MM-DD
+        return date.toISOString().split('T')[0];
     }
 
     function formatDateRO(date) {
@@ -119,7 +113,6 @@ function ClassesView() {
         return "";
     }
 
-    // --- Helpers Creare / Ștergere (Standard) ---
     const handleCreate = async () => {
         const fullSchedule = `${newClass.scheduleDay} ${newClass.scheduleTime}`;
         try {
@@ -136,7 +129,6 @@ function ClassesView() {
         catch (e) { alert("Eroare la ștergere."); }
     };
 
-    // --- RENDER ---
     const weekEnd = addDays(currentWeekStart, 6);
 
     return (
@@ -147,14 +139,14 @@ function ClassesView() {
                 <h1 style={{margin:0, color:'var(--c-primary)', marginBottom:'15px'}}>Prezență & Orar</h1>
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px', background:'white', padding:'10px 20px', borderRadius:'50px', boxShadow:'0 2px 10px rgba(0,0,0,0.1)' }}>
-                    <button className="btn" onClick={goToPrevWeek}>&lt;</button>
+                    <button className="btn" onClick={goToPrevWeek} style={{color: 'black'}}>&lt;</button>
                     <div style={{textAlign:'center'}}>
                         <span style={{display:'block', fontSize:'0.8rem', color:'#888', fontWeight:'bold'}}>SĂPTĂMÂNA</span>
                         <span style={{fontSize:'1.1rem', fontWeight:'bold', color:'var(--c-secondary)'}}>
                             {formatDateRO(currentWeekStart)} - {formatDateRO(weekEnd)}
                         </span>
                     </div>
-                    <button className="btn" onClick={goToNextWeek}>&gt;</button>
+                    <button className="btn" onClick={goToNextWeek} style={{color: 'black'}}>&gt;</button>
                     <button className="btn btn-primary" style={{fontSize:'0.8rem', marginLeft:'10px'}} onClick={goToCurrentWeek}>Azi</button>
                 </div>
 
@@ -169,9 +161,7 @@ function ClassesView() {
                     <h3 className="hall-header">{hall}</h3>
                     <div className="schedule-table-container">
                         {DAYS.map((day, index) => {
-                            // Calculăm data pentru afișare în antetul coloanei (ex: Luni 12.02)
                             const currentDayDate = addDays(currentWeekStart, index);
-                            
                             return (
                                 <div key={day} className="day-column">
                                     <h4 className="day-title">
@@ -199,7 +189,7 @@ function ClassesView() {
                 </div>
             ))}
 
-            {/* MODAL PREZENȚĂ */}
+            {/* MODAL PREZENȚĂ - DESIGN ORIGINAL CU EXPIRARE */}
             {selectedClass && (
                 <div className="modal-overlay" onClick={() => setSelectedClass(null)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -207,7 +197,6 @@ function ClassesView() {
                         
                         <h2 style={{color:'var(--c-secondary)', marginBottom:'5px'}}>{selectedClass.title}</h2>
                         <p style={{fontWeight:'bold', color:'#666', marginBottom:'20px'}}>
-                            {/* Afișăm data exactă pentru care facem prezența */}
                             Data: {formatDateRO(addDays(currentWeekStart, DAYS.indexOf(getDayFromSchedule(selectedClass.schedule))))}
                         </p>
 
@@ -218,7 +207,15 @@ function ClassesView() {
                                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
                                         padding: '10px', borderBottom: '1px solid #eee', background:'white', marginBottom:'5px', borderRadius:'4px'
                                     }}>
-                                        <span style={{fontWeight:'500'}}>{student.fullName}</span>
+                                        <div>
+                                            <span style={{fontWeight:'500'}}>{student.fullName}</span>
+                                            {/* AFISARE DATA EXPIRARE SUB NUME */}
+                                            {student.expirationDate && (
+                                                <div style={{fontSize:'0.7rem', color: new Date(student.expirationDate) < new Date() ? '#e74c3c' : '#888'}}>
+                                                    Expiră la: {student.expirationDate}
+                                                </div>
+                                            )}
+                                        </div>
                                         <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap:'8px' }}>
                                             <span style={{ fontSize: '0.85rem', color: student.participated ? '#2ecc71' : '#ccc', fontWeight:'bold' }}>
                                                 {student.participated ? 'PREZENT' : 'ABSENT'}
@@ -233,7 +230,7 @@ function ClassesView() {
                                     </div>
                                 ))
                             ) : (
-                                <p style={{textAlign:'center', color:'#999'}}>Nu sunt studenți înscriși.</p>
+                                <p style={{textAlign:'center', color:'#999'}}>Nu sunt studenți înscriși sau abonamentele au expirat.</p>
                             )}
                         </div>
                         
@@ -246,7 +243,7 @@ function ClassesView() {
                 </div>
             )}
 
-            {/* MODAL ADĂUGARE (Rămâne neschimbat, dar îl includ pt completitudine) */}
+            {/* MODAL ADĂUGARE */}
             {isAddModalOpen && (
                 <div className="modal-overlay">
                     <div className="modal-content" style={{maxWidth:'500px'}}>
