@@ -60,13 +60,13 @@ function ClassesView() {
                     const enrollmentDate = new Date(student.enrollmentDate);
                     enrollmentDate.setHours(0, 0, 0, 0);
                     
-                    // Studentul apare DOAR dacă clasa este între enrollment și expirare
+                    // Studentul apare DOAR dacă data clasei este între enrollment și expirare
                     return classDate >= enrollmentDate && classDate <= expirationDate;
                 }
                 
-                // FALLBACK: Dacă nu avem enrollmentDate, presupunem că studentul a fost înscris AZI
-                // Deci nu apare pentru clase din TRECUT (înainte de azi)
-                return classDate >= today;
+                // FALLBACK: Dacă nu avem enrollmentDate, studentul apare DOAR de azi înainte
+                // Previne apariția în trecut pentru înscrieri noi fără dată istorică
+                return classDate >= today && classDate <= expirationDate;
             });
             
             setAttendanceList(filteredStudents);
@@ -77,16 +77,14 @@ function ClassesView() {
     };
 
     const handleClassClick = (cls) => {
-    setSelectedClass(cls);
-    const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); 
-    if (dayIndex !== -1) {
-        const specificDate = addDays(currentWeekStart, dayIndex);
-        const formattedDate = formatDateISO(specificDate);
-        
-        // ACEST APEL TREBUIE SĂ CONȚINĂ DATA CORECTĂ:
-        fetchAttendance(cls.id, formattedDate); 
-    }
-};
+        setSelectedClass(cls);
+        const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); 
+        if (dayIndex !== -1) {
+            const specificDate = addDays(currentWeekStart, dayIndex);
+            const formattedDate = formatDateISO(specificDate);
+            fetchAttendance(cls.id, formattedDate); 
+        }
+    };
 
     // 4. Toggle Prezență
     const handleToggleParticipation = async (studentId, currentStatus) => {
@@ -223,7 +221,7 @@ function ClassesView() {
                 </div>
             ))}
 
-            {/* MODAL PREZENȚĂ - DESIGN ORIGINAL CU EXPIRARE */}
+            {/* MODAL PREZENȚĂ */}
             {selectedClass && (
                 <div className="modal-overlay" onClick={() => setSelectedClass(null)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -243,7 +241,6 @@ function ClassesView() {
                                     }}>
                                         <div>
                                             <span style={{fontWeight:'500'}}>{student.fullName}</span>
-                                            {/* AFISARE DATA EXPIRARE SUB NUME */}
                                             {student.expirationDate && (
                                                 <div style={{fontSize:'0.7rem', color: new Date(student.expirationDate) < new Date() ? '#e74c3c' : '#888'}}>
                                                     Expiră la: {student.expirationDate}

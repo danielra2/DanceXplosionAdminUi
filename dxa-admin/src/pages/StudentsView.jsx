@@ -31,7 +31,7 @@ function StudentsView() {
     // --- STATE REÎNNOIRE ---
     const [renewalData, setRenewalData] = useState({
         amount: '',
-        newExpirationDate: '',
+        courseExpirations: {}, // { courseId: expirationDate, ... }
         selectedCourseIds: [],
         generatedComment: ''
     });
@@ -100,11 +100,19 @@ function StudentsView() {
         const allEnrolledIds = student.enrolledClasses ? student.enrolledClasses.map(c => c.id) : [];
         const courseNames = student.enrolledClasses ? student.enrolledClasses.map(c => c.title).join(", ") : "";
         
+        // Inițializare courseExpirations cu datele actuale
+        const courseExpirations = {};
+        if (student.enrolledClasses) {
+            student.enrolledClasses.forEach(c => {
+                courseExpirations[c.id] = c.expirationDate || '';
+            });
+        }
+        
         setRenewalData({
             amount: student.nextPaymentAmount > 0 ? student.nextPaymentAmount : '',
-            newExpirationDate: currentExp,
-            selectedCourseIds: allEnrolledIds,
-            generatedComment: courseNames ? `Abonament: ${courseNames}` : "Abonament general"
+            courseExpirations: courseExpirations,
+            selectedCourseIds: [],
+            generatedComment: ''
         });
 
         setActiveTab('renewal'); 
@@ -128,27 +136,53 @@ function StudentsView() {
             return { 
                 ...prev, 
                 selectedCourseIds: newSelection,
-                generatedComment: selectedNames ? `Abonament: ${selectedNames}` : "Abonament parțial"
+                generatedComment: selectedNames ? `Reînnoire: ${selectedNames}` : ""
             };
         });
     };
 
     // 4. SUBMIT REÎNNOIRE
     const handleRenewalSubmit = async () => {
-        if (!renewalData.amount || !renewalData.newExpirationDate) {
-            alert("⚠️ Te rog introdu SUMA și DATA viitoare de expirare."); return;
+        if (!renewalData.amount) {
+            alert("⚠️ Te rog introdu SUMA.");
+            return;
         }
+
+        if (renewalData.selectedCourseIds.length === 0) {
+            alert("⚠️ Te rog selectează cel puțin un curs.");
+            return;
+        }
+
+        const missingDates = renewalData.selectedCourseIds.filter(id => !renewalData.courseExpirations[id]);
+        if (missingDates.length > 0) {
+            alert("⚠️ Te rog introdu data de expirare pentru toate cursurile selectate.");
+            return;
+        }
+
         try {
-            const payload = {
-                subscriptionExpirationDate: renewalData.newExpirationDate,
+            // Reînnoiește fiecare curs separat (păstrează celelalte cursuri neschimbate)
+            const renewalPromises = renewalData.selectedCourseIds.map(courseId =>
+                api.post(
+                    `/admin/enrollments/student/${currentStudent.id}/class/${courseId}?expirationDate=${renewalData.courseExpirations[courseId]}`
+                )
+            );
+
+            await Promise.all(renewalPromises);
+
+            // Salvează doar metadata de plată (fără să suprascrie alte cursuri)
+            const paymentPayload = {
                 lastPaymentAmount: parseFloat(renewalData.amount),
                 lastPaymentComment: renewalData.generatedComment
             };
-            await api.put(`/admin/users/${currentStudent.id}`, payload);
-            alert("✅ Plată procesată!");
+            await api.put(`/admin/users/${currentStudent.id}`, paymentPayload);
+
+            alert("✅ Reînnoriri procesate!");
             setInfoModalOpen(false);
             fetchFilteredUsers();
-        } catch (error) { alert("Eroare la procesarea plății."); }
+        } catch (error) {
+            console.error(error);
+            alert("Eroare la procesarea reînnoririlor. Verifică datele introduse.");
+        }
     };
 
     // 5. UPDATE PROFIL
@@ -328,23 +362,34 @@ function StudentsView() {
                                     </div>
                                 </div>
                                 <div style={{border:'1px solid #e0e0e0', padding:'20px', borderRadius:'8px', background:'white'}}>
-                                    <h4 style={{margin:'0 0 15px 0', color:'#27ae60'}}>💰 Încasează Abonament Nou</h4>
-                                    <label style={labelStyle}>Cursuri vizate</label>
-                                    <div style={{display:'flex', flexDirection:'column', gap:'8px', marginBottom:'15px', maxHeight:'120px', overflowY:'auto', background:'#fafafa', padding:'10px', borderRadius:'6px', border:'1px solid #eee'}}>
+                                    <h4 style={{margin:'0 0 15px 0', color:'#27ae60'}}>💰 Reînnorire Abonament pe Curs</h4>
+                                    <label style={labelStyle}>Selectează Cursuri pentru Reînnorire</label>
+                                    <div style={{display:'flex', flexDirection:'column', gap:'12px', marginBottom:'20px', maxHeight:'200px', overflowY:'auto', background:'#fafafa', padding:'12px', borderRadius:'6px', border:'1px solid #eee'}}>
                                         {currentStudent.enrolledClasses?.map(cls => (
-                                            <label key={cls.id} style={{display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', fontSize:'0.9rem'}}>
-                                                <input type="checkbox" checked={renewalData.selectedCourseIds.includes(cls.id)} onChange={() => toggleCourseSelection(cls.id)} />
-                                                {cls.title}
-                                            </label>
+                                            <div key={cls.id} style={{background:'white', padding:'12px', borderRadius:'6px', border: renewalData.selectedCourseIds.includes(cls.id) ? '2px solid #27ae60' : '1px solid #ddd'}}>
+                                                <label style={{display:'flex', alignItems:'flex-start', gap:'10px', cursor:'pointer', marginBottom:'10px'}}>
+                                                    <input type="checkbox" checked={renewalData.selectedCourseIds.includes(cls.id)} onChange={() => toggleCourseSelection(cls.id)} style={{marginTop:'2px'}} />
+                                                    <div style={{flex:1}}>
+                                                        <div style={{fontWeight:'500', fontSize:'0.95rem'}}>{cls.title}</div>
+                                                        {cls.expirationDate && <div style={{fontSize:'0.75rem', color:'#666', marginTop:'2px'}}>Data actuală: {cls.expirationDate}</div>}
+                                                    </div>
+                                                </label>
+                                                {renewalData.selectedCourseIds.includes(cls.id) && (
+                                                    <div style={{marginLeft:'30px'}}>
+                                                        <label style={{...labelStyle, fontSize:'0.8rem', marginBottom:'5px'}}>Expiră La (noua dată)</label>
+                                                        <input type="date" className="input-field" value={renewalData.courseExpirations[cls.id] || ''} onChange={e => setRenewalData({...renewalData, courseExpirations: {...renewalData.courseExpirations, [cls.id]: e.target.value}})} style={{borderColor:'#27ae60'}} />
+                                                    </div>
+                                                )}
+                                            </div>
                                         ))}
                                     </div>
-                                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', marginBottom:'15px'}}>
-                                        <div style={{display:'flex', flexDirection:'column'}}><label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Suma (RON)</label><input type="number" className="input-field" value={renewalData.amount} onChange={e => setRenewalData({...renewalData, amount: e.target.value})} style={{borderColor:'#27ae60'}} /></div>
-                                        <div style={{display:'flex', flexDirection:'column'}}><label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Expiră La</label><input type="date" className="input-field" value={renewalData.newExpirationDate} onChange={e => setRenewalData({...renewalData, newExpirationDate: e.target.value})} /></div>
+                                    <div style={{marginBottom:'15px'}}>
+                                        <label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Suma (RON)</label>
+                                        <input type="number" className="input-field" value={renewalData.amount} onChange={e => setRenewalData({...renewalData, amount: e.target.value})} style={{borderColor:'#27ae60'}} />
                                     </div>
-                                    <label style={labelStyle}>Notă Plată</label>
+                                    <label style={labelStyle}>Notă / Motiv Reducere</label>
                                     <textarea className="input-field" rows="2" value={renewalData.generatedComment} onChange={e => setRenewalData({...renewalData, generatedComment: e.target.value})} style={{fontSize:'0.85rem', resize:'none'}} />
-                                    <button onClick={handleRenewalSubmit} className="btn" style={{width:'100%', background:'#27ae60', color:'white'}}>CONFIRMĂ PLATA</button>
+                                    <button onClick={handleRenewalSubmit} className="btn" style={{width:'100%', background:'#27ae60', color:'white', marginTop:'15px'}}>CONFIRMĂ PLATA</button>
                                 </div>
                             </div>
                         )}
