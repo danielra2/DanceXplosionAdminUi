@@ -34,8 +34,42 @@ function ClassesView() {
     const fetchAttendance = async (classId, dateStr) => {
         try {
             const res = await api.get(`/attendance/class/${classId}?date=${dateStr}`);
-            // Backend-ul returnează ClassStudentDto care acum include expirationDate
-            setAttendanceList(res.data.students || []);
+            const classDate = new Date(dateStr);
+            classDate.setHours(0, 0, 0, 0);
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            // Filtrează studenții să apară DOAR între data înscrierii și data expirării
+            const filteredStudents = (res.data.students || []).filter(student => {
+                // Verifică expirare
+                if (!student.expirationDate) {
+                    return false;
+                }
+                
+                const expirationDate = new Date(student.expirationDate);
+                expirationDate.setHours(23, 59, 59, 999);
+                
+                // Nu arăta studenți pentru clase după expirare
+                if (classDate > expirationDate) {
+                    return false;
+                }
+                
+                // Verifică enrollment date (data înscrierii)
+                if (student.enrollmentDate) {
+                    const enrollmentDate = new Date(student.enrollmentDate);
+                    enrollmentDate.setHours(0, 0, 0, 0);
+                    
+                    // Studentul apare DOAR dacă clasa este între enrollment și expirare
+                    return classDate >= enrollmentDate && classDate <= expirationDate;
+                }
+                
+                // FALLBACK: Dacă nu avem enrollmentDate, presupunem că studentul a fost înscris AZI
+                // Deci nu apare pentru clase din TRECUT (înainte de azi)
+                return classDate >= today;
+            });
+            
+            setAttendanceList(filteredStudents);
         } catch (error) {
             console.error("Eroare la incarcarea prezenței:", error);
             setAttendanceList([]);
