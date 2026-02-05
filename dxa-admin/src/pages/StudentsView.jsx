@@ -11,7 +11,7 @@ function StudentsView() {
 
     // --- STATE MODAL INFO ---
     const [infoModalOpen, setInfoModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('renewal'); // Default pe Reînnoire (cel mai des folosit)
+    const [activeTab, setActiveTab] = useState('renewal'); // Default pe Reînnoire
     const [currentStudent, setCurrentStudent] = useState(null);
     
     // Date Profil
@@ -19,24 +19,29 @@ function StudentsView() {
     
     // Statistici
     const [studentStats, setStudentStats] = useState(null);
-    const [statsRange, setStatsRange] = useState('MONTH');
     
-    // Înscriere Curs Nou
+    // Înscriere Curs Nou (din panoul de administrare existent)
     const [classToEnroll, setClassToEnroll] = useState('');
 
-    // --- STATE REÎNNOIRE (LOGICĂ NOUĂ) ---
+    // --- STATE REÎNNOIRE (LOGICĂ EXISTENTĂ) ---
     const [renewalData, setRenewalData] = useState({
         amount: '',
         newExpirationDate: '',
-        selectedCourseIds: [], // ID-urile cursurilor selectate pentru plată
-        generatedComment: ''   // Textul care apare la istoric (ex: "Plata pt Salsa")
+        selectedCourseIds: [],
+        generatedComment: ''
     });
 
-    // --- STATE CREARE STUDENT ---
+    // --- STATE CREARE STUDENT (ACTUALIZAT) ---
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [newStudent, setNewStudent] = useState({
-        firstName: '', lastName: '', email: '', password: '', phone: '',
-        subscriptionExpirationDate: '', nextPaymentAmount: ''
+        firstName: '', 
+        lastName: '', 
+        email: '', 
+        password: '', 
+        phone: '',
+        subscriptionExpirationDate: '', 
+        lastPaymentAmount: '',
+        enrolledClassIds: [] // <--- LISTA PENTRU SELECTIA CURSURILOR LA CREARE
     });
 
     // 1. ÎNCĂRCARE DATE
@@ -85,8 +90,6 @@ function StudentsView() {
         const currentExp = student.subscriptionExpirationDate ? new Date(student.subscriptionExpirationDate) : new Date();
         const nextMonthDate = new Date(currentExp);
         
-        // Dacă abonamentul e expirat de mult, punem data de azi + 1 lună. 
-        // Dacă e încă valid, adăugăm 1 lună la data curentă de expirare.
         if (currentExp < new Date()) {
             const today = new Date();
             today.setMonth(today.getMonth() + 1);
@@ -95,10 +98,7 @@ function StudentsView() {
             nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
         }
 
-        // Implicit selectăm toate cursurile active pentru plată
         const allEnrolledIds = student.enrolledClasses ? student.enrolledClasses.map(c => c.id) : [];
-        
-        // Generăm textul default
         const courseNames = student.enrolledClasses ? student.enrolledClasses.map(c => c.title).join(", ") : "";
         const defaultComment = courseNames ? `Abonament: ${courseNames}` : "Abonament general";
 
@@ -127,7 +127,6 @@ function StudentsView() {
                 newSelection = [...prev.selectedCourseIds, courseId];
             }
 
-            // Regenerăm comentariul automat
             const selectedNames = currentStudent.enrolledClasses
                 .filter(c => newSelection.includes(c.id))
                 .map(c => c.title)
@@ -156,8 +155,8 @@ function StudentsView() {
                 phone: editingData.phone,
                 subscriptionExpirationDate: renewalData.newExpirationDate,
                 lastPaymentAmount: parseFloat(renewalData.amount),
-                nextPaymentAmount: 0, // Resetăm datoria
-                lastPaymentComment: renewalData.generatedComment // Aici salvăm istoricul!
+                nextPaymentAmount: 0,
+                lastPaymentComment: renewalData.generatedComment
             };
 
             await api.put(`/admin/users/${currentStudent.id}`, payload);
@@ -176,8 +175,7 @@ function StudentsView() {
         } catch (e) { alert("Eroare"); }
     };
 
-    // 6. ÎNSCRIERE CURS NOU (FILTRAT)
-    // Calculăm cursurile disponibile (la care NU e deja înscris)
+    // 6. ÎNSCRIERE CURS NOU (DIN MODALUL DE ADMINISTRARE)
     const availableClasses = classes.filter(cls => 
         !currentStudent?.enrolledClasses?.some(enrolled => enrolled.id === cls.id)
     );
@@ -187,7 +185,7 @@ function StudentsView() {
         try {
             await api.post(`/admin/enrollments/student/${currentStudent.id}/class/${classToEnroll}`);
             alert("Înscris cu succes!");
-            setInfoModalOpen(false); // Închidem ca să se facă refresh la date
+            setInfoModalOpen(false);
             fetchFilteredUsers();
         } catch (e) { alert("Eroare la înscriere."); }
     };
@@ -203,10 +201,36 @@ function StudentsView() {
         }
     };
 
-    // 7. CREARE STUDENT
+    // 7. CREARE STUDENT (LOGICĂ ACTUALIZATĂ)
+    // Funcție pentru a selecta cursurile în modalul de creare
+    const toggleNewStudentCourse = (courseId) => {
+        setNewStudent(prev => {
+            const isSelected = prev.enrolledClassIds.includes(courseId);
+            if (isSelected) {
+                return { ...prev, enrolledClassIds: prev.enrolledClassIds.filter(id => id !== courseId) };
+            } else {
+                return { ...prev, enrolledClassIds: [...prev.enrolledClassIds, courseId] };
+            }
+        });
+    };
+
     const handleCreateStudent = async () => {
-        try { await api.post('/users/student', newStudent); alert("Student Creat!"); setIsCreateModalOpen(false); fetchFilteredUsers(); } 
-        catch (e) { alert("Eroare creare."); }
+        try { 
+            // Trimitem obiectul newStudent care acum conține și enrolledClassIds
+            await api.post('/users/student', newStudent); 
+            alert("Student Creat și Înscris!"); 
+            setIsCreateModalOpen(false); 
+            // Resetăm formularul
+            setNewStudent({
+                firstName: '', lastName: '', email: '', password: '', phone: '',
+                subscriptionExpirationDate: '', lastPaymentAmount: '', enrolledClassIds: []
+            });
+            fetchFilteredUsers(); 
+        } 
+        catch (e) { 
+            console.error(e);
+            alert("Eroare la creare. Verifică datele (email unic etc.)"); 
+        }
     };
 
     // 8. STATISTICI
@@ -272,7 +296,7 @@ function StudentsView() {
                 </tbody>
             </table>
 
-            {/* --- MODAL PRINCIPAL --- */}
+            {/* --- MODAL DETALII STUDENT --- */}
             {infoModalOpen && currentStudent && (
                 <div style={modalStyle}>
                     <div style={modalContentStyle}>
@@ -454,23 +478,82 @@ function StudentsView() {
                 </div>
             )}
 
-            {/* MODAL CREARE STUDENT */}
+            {/* --- MODAL CREARE STUDENT (DESIGN NOU) --- */}
             {isCreateModalOpen && (
                 <div style={modalStyle}>
-                    <div style={{...modalContentStyle, maxWidth:'500px'}}>
-                        <h2 style={{marginTop:0}}>Student Nou</h2>
-                        <div style={{display:'grid', gap:'10px'}}>
-                            <input className="input-field" placeholder="Prenume" value={newStudent.firstName} onChange={e => setNewStudent({...newStudent, firstName: e.target.value})} />
-                            <input className="input-field" placeholder="Nume" value={newStudent.lastName} onChange={e => setNewStudent({...newStudent, lastName: e.target.value})} />
-                            <input className="input-field" placeholder="Email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} />
-                            <input className="input-field" placeholder="Telefon" value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} />
-                            <input className="input-field" type="password" placeholder="Parola" value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} />
-                            <label style={labelStyle}>Data Expirare (Opțional)</label>
-                            <input className="input-field" type="date" value={newStudent.subscriptionExpirationDate} onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})} />
+                    <div style={{...modalContentStyle, maxWidth:'700px'}}>
+                        <h2 style={{marginTop:0, borderBottom:'1px solid #eee', paddingBottom:'10px', color:'var(--c-primary)'}}>
+                            Înregistrare Student Nou
+                        </h2>
+                        
+                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                            
+                            {/* COLOANA 1: Date Personale */}
+                            <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+                                <h4 style={{margin:'0 0 5px 0', color:'#555'}}>👤 Date Personale</h4>
+                                <input className="input-field" placeholder="Prenume" value={newStudent.firstName} onChange={e => setNewStudent({...newStudent, firstName: e.target.value})} />
+                                <input className="input-field" placeholder="Nume" value={newStudent.lastName} onChange={e => setNewStudent({...newStudent, lastName: e.target.value})} />
+                                <input className="input-field" placeholder="Email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} />
+                                <input className="input-field" placeholder="Telefon" value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} />
+                                <input className="input-field" type="password" placeholder="Parola" value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} />
+                            </div>
+
+                            {/* COLOANA 2: Abonament & Cursuri */}
+                            <div style={{display:'flex', flexDirection:'column', gap:'10px', background:'#f8f9fa', padding:'15px', borderRadius:'8px', border:'1px solid #eee'}}>
+                                <h4 style={{margin:'0 0 5px 0', color:'#27ae60'}}>💰 Abonament & Cursuri</h4>
+                                
+                                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px'}}>
+                                    <div>
+                                        <label style={labelStyle}>Suma (RON)</label>
+                                        <input 
+                                            className="input-field" 
+                                            type="number" 
+                                            placeholder="0" 
+                                            value={newStudent.lastPaymentAmount} 
+                                            onChange={e => setNewStudent({...newStudent, lastPaymentAmount: e.target.value})} 
+                                            style={{fontWeight:'bold', color:'#2c3e50'}} 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={labelStyle}>Expiră La</label>
+                                        <input 
+                                            className="input-field" 
+                                            type="date" 
+                                            value={newStudent.subscriptionExpirationDate} 
+                                            onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})} 
+                                        />
+                                    </div>
+                                </div>
+
+                                <label style={{...labelStyle, marginTop:'5px'}}>Înscrie la cursurile:</label>
+                                <div style={{
+                                    maxHeight:'180px', 
+                                    overflowY:'auto', 
+                                    background:'white', 
+                                    border:'1px solid #ddd', 
+                                    padding:'10px', 
+                                    borderRadius:'6px'
+                                }}>
+                                    {classes.map(cls => (
+                                        <label key={cls.id} style={{display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', marginBottom:'6px', fontSize:'0.9rem'}}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={newStudent.enrolledClassIds.includes(cls.id)}
+                                                onChange={() => toggleNewStudentCourse(cls.id)}
+                                                style={{accentColor:'#27ae60', width:'16px', height:'16px'}}
+                                            />
+                                            {cls.title} <span style={{color:'#999', fontSize:'0.8rem'}}>({cls.schedule})</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
-                        <div style={{marginTop:'20px', display:'flex', justifyContent:'flex-end', gap:'10px'}}>
+
+                        <div style={{marginTop:'25px', display:'flex', justifyContent:'flex-end', gap:'10px', borderTop:'1px solid #eee', paddingTop:'15px'}}>
                             <button className="btn" style={{background:'#ccc'}} onClick={() => setIsCreateModalOpen(false)}>Anulează</button>
-                            <button className="btn btn-primary" onClick={handleCreateStudent}>Creează</button>
+                            <button className="btn btn-primary" onClick={handleCreateStudent} style={{background:'#27ae60'}}>
+                                ✅ Creează Student & Înscrie
+                            </button>
                         </div>
                     </div>
                 </div>
