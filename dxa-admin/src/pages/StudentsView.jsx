@@ -2,56 +2,52 @@ import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 
 function StudentsView() {
-    // --- STATE DATE PRINCIPALE ---
+    // --- STATE DATE ---
     const [students, setStudents] = useState([]);
     const [classes, setClasses] = useState([]);
-    const [filters, setFilters] = useState({ search: '', status: '', courseId: '' });
     
-    // --- STATE MODALURI ---
+    // --- STATE FILTRE ---
+    const [filters, setFilters] = useState({ search: '', status: '', courseId: '' });
+
+    // --- STATE MODAL INFO ---
     const [infoModalOpen, setInfoModalOpen] = useState(false);
-    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('profile');
+    const [activeTab, setActiveTab] = useState('renewal'); // Default pe Reînnoire (cel mai des folosit)
     const [currentStudent, setCurrentStudent] = useState(null);
-
-    // --- STATE FORMULAR INSCRIERE (Adaugare Nou / Tab Inscriere) ---
-    const [selectedClasses, setSelectedClasses] = useState([]);
-    const [enrollMonths, setEnrollMonths] = useState(1);
-    const [paymentAmount, setPaymentAmount] = useState(0);
-    const [discountComment, setDiscountComment] = useState('');
-
-    // --- STATE EDITARE PROFIL ---
-    const [editingData, setEditingData] = useState({
-        id: null, firstName: '', lastName: '', email: '', phone: '',
-        subscriptionExpirationDate: '', lastPaymentAmount: 0, nextPaymentAmount: 0
-    });
-
-    // --- STATE CREARE STUDENT NOU ---
-    const [newStudent, setNewStudent] = useState({
-        firstName: '', lastName: '', email: '', password: '', phone: ''
-    });
-
-    // --- STATE STATISTICI ---
+    
+    // Date Profil
+    const [editingData, setEditingData] = useState({}); 
+    
+    // Statistici
     const [studentStats, setStudentStats] = useState(null);
     const [statsRange, setStatsRange] = useState('MONTH');
+    
+    // Înscriere Curs Nou
+    const [classToEnroll, setClassToEnroll] = useState('');
 
-    // 1. Incarcare date
+    // --- STATE REÎNNOIRE (LOGICĂ NOUĂ) ---
+    const [renewalData, setRenewalData] = useState({
+        amount: '',
+        newExpirationDate: '',
+        selectedCourseIds: [], // ID-urile cursurilor selectate pentru plată
+        generatedComment: ''   // Textul care apare la istoric (ex: "Plata pt Salsa")
+    });
+
+    // --- STATE CREARE STUDENT ---
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [newStudent, setNewStudent] = useState({
+        firstName: '', lastName: '', email: '', password: '', phone: '',
+        subscriptionExpirationDate: '', nextPaymentAmount: ''
+    });
+
+    // 1. ÎNCĂRCARE DATE
     const fetchData = async () => {
         try {
             const classesRes = await api.get('/classes');
             setClasses(classesRes.data);
-            fetchFilteredUsers(); 
-        } catch (error) { console.error("Eroare date:", error); }
+        } catch (error) { console.warn("Eroare incarcare cursuri"); }
+        await fetchFilteredUsers(); 
     };
-
     useEffect(() => { fetchData(); }, []);
-
-    // Calcul automat pret sugerat cu logica de discount (360/2 cursuri)
-    useEffect(() => {
-        let basePrice = selectedClasses.length * 200;
-        if (selectedClasses.length === 2) basePrice = 360;
-        else if (selectedClasses.length > 2) basePrice = selectedClasses.length * 170;
-        setPaymentAmount(basePrice * enrollMonths);
-    }, [selectedClasses, enrollMonths]);
 
     const fetchFilteredUsers = async () => {
         try {
@@ -61,7 +57,7 @@ function StudentsView() {
             if (filters.courseId) params.append('courseId', filters.courseId);
             const response = await api.get(`/users?${params.toString()}`);
             setStudents(response.data.userList || response.data);
-        } catch (error) { console.error("Eroare filtrare:", error); }
+        } catch (error) { alert("Nu pot încărca studenții."); }
     };
 
     const handleResetFilters = () => {
@@ -69,269 +65,412 @@ function StudentsView() {
         api.get('/users').then(res => setStudents(res.data.userList || res.data));
     };
 
-    // 2. Actiuni Modale
+    // 2. CONFIGURARE MODAL (DESCHIDERE)
     const openInfoModal = (student) => {
         setCurrentStudent(student);
+        
+        // A. Setup Editare Profil
         setEditingData({
-            id: student.id, firstName: student.firstName, lastName: student.lastName, email: student.email,
-            phone: student.phone || '', subscriptionExpirationDate: student.subscriptionExpirationDate || '',
-            lastPaymentAmount: student.lastPaymentAmount || 0, nextPaymentAmount: student.nextPaymentAmount || 0
+            id: student.id,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            email: student.email,
+            phone: student.phone || '',
+            subscriptionExpirationDate: student.subscriptionExpirationDate || '',
+            lastPaymentAmount: student.lastPaymentAmount,
+            nextPaymentAmount: student.nextPaymentAmount
         });
-        setActiveTab('profile');
-        setStudentStats(null);
-        setSelectedClasses([]);
+
+        // B. Setup Reînnoire
+        const currentExp = student.subscriptionExpirationDate ? new Date(student.subscriptionExpirationDate) : new Date();
+        const nextMonthDate = new Date(currentExp);
+        
+        // Dacă abonamentul e expirat de mult, punem data de azi + 1 lună. 
+        // Dacă e încă valid, adăugăm 1 lună la data curentă de expirare.
+        if (currentExp < new Date()) {
+            const today = new Date();
+            today.setMonth(today.getMonth() + 1);
+            nextMonthDate.setTime(today.getTime());
+        } else {
+            nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+        }
+
+        // Implicit selectăm toate cursurile active pentru plată
+        const allEnrolledIds = student.enrolledClasses ? student.enrolledClasses.map(c => c.id) : [];
+        
+        // Generăm textul default
+        const courseNames = student.enrolledClasses ? student.enrolledClasses.map(c => c.title).join(", ") : "";
+        const defaultComment = courseNames ? `Abonament: ${courseNames}` : "Abonament general";
+
+        setRenewalData({
+            amount: student.nextPaymentAmount > 0 ? student.nextPaymentAmount : '',
+            newExpirationDate: nextMonthDate.toISOString().split('T')[0],
+            selectedCourseIds: allEnrolledIds,
+            generatedComment: defaultComment
+        });
+
+        setActiveTab('renewal'); 
+        setStudentStats(null); 
+        setClassToEnroll('');
         setInfoModalOpen(true);
     };
 
-    const handleTabChange = (tab) => {
-        setActiveTab(tab);
-        if (tab === 'stats' && currentStudent) fetchStats(currentStudent.id, statsRange);
+    // 3. LOGICĂ CHECKBOX REÎNNOIRE
+    const toggleCourseSelection = (courseId) => {
+        setRenewalData(prev => {
+            const isSelected = prev.selectedCourseIds.includes(courseId);
+            let newSelection;
+            
+            if (isSelected) {
+                newSelection = prev.selectedCourseIds.filter(id => id !== courseId);
+            } else {
+                newSelection = [...prev.selectedCourseIds, courseId];
+            }
+
+            // Regenerăm comentariul automat
+            const selectedNames = currentStudent.enrolledClasses
+                .filter(c => newSelection.includes(c.id))
+                .map(c => c.title)
+                .join(", ");
+            
+            const newComment = selectedNames ? `Abonament: ${selectedNames}` : "Abonament parțial";
+
+            return { 
+                ...prev, 
+                selectedCourseIds: newSelection,
+                generatedComment: newComment
+            };
+        });
     };
 
-    // Salvare Profil & Urmatoarea Plata
-    const handleUpdateStudent = async () => {
+    // 4. SUBMIT REÎNNOIRE
+    const handleRenewalSubmit = async () => {
+        if (!renewalData.amount || !renewalData.newExpirationDate) {
+            alert("⚠️ Te rog introdu SUMA și DATA viitoare de expirare."); return;
+        }
+
+        try {
+            const payload = {
+                firstName: editingData.firstName,
+                lastName: editingData.lastName,
+                phone: editingData.phone,
+                subscriptionExpirationDate: renewalData.newExpirationDate,
+                lastPaymentAmount: parseFloat(renewalData.amount),
+                nextPaymentAmount: 0, // Resetăm datoria
+                lastPaymentComment: renewalData.generatedComment // Aici salvăm istoricul!
+            };
+
+            await api.put(`/admin/users/${currentStudent.id}`, payload);
+            alert(`✅ Succes!\nÎncasat: ${renewalData.amount} RON\nPt: ${renewalData.generatedComment}`);
+            setInfoModalOpen(false);
+            fetchFilteredUsers();
+        } catch (error) { alert("Eroare la procesarea plății."); }
+    };
+
+    // 5. UPDATE PROFIL SIMPLU
+    const handleUpdateProfile = async () => {
         try {
             await api.put(`/admin/users/${editingData.id}`, editingData);
             alert("Profil actualizat!");
             fetchFilteredUsers();
-            setInfoModalOpen(false);
-        } catch (error) { alert("Eroare la salvare."); }
+        } catch (e) { alert("Eroare"); }
     };
 
-    // Logica Inscriere Multipla
-    const processBulkEnrollment = async (studentId, currentEditingData) => {
-        const newExpDate = new Date();
-        newExpDate.setMonth(newExpDate.getMonth() + parseInt(enrollMonths));
-        const formattedDate = newExpDate.toISOString().split('T')[0];
+    // 6. ÎNSCRIERE CURS NOU (FILTRAT)
+    // Calculăm cursurile disponibile (la care NU e deja înscris)
+    const availableClasses = classes.filter(cls => 
+        !currentStudent?.enrolledClasses?.some(enrolled => enrolled.id === cls.id)
+    );
 
-        for (const classId of selectedClasses) {
-            // Trimitem data de expirare ca parametru daca backend-ul a fost ajustat
-            await api.post(`/admin/enrollments/student/${studentId}/class/${classId}?expirationDate=${formattedDate}`);
-        }
-
-        await api.put(`/admin/users/${studentId}`, {
-            ...currentEditingData,
-            subscriptionExpirationDate: formattedDate,
-            lastPaymentAmount: paymentAmount,
-            phone: discountComment ? `${currentEditingData.phone} | NOTA: ${discountComment}` : currentEditingData.phone
-        });
-    };
-
-    const handleAdminEnroll = async () => {
-        if (selectedClasses.length === 0) return alert("Alege un curs!");
+    const handleEnroll = async () => {
+        if (!classToEnroll) return;
         try {
-            await processBulkEnrollment(currentStudent.id, editingData);
-            alert("Inscriere finalizata!");
-            setInfoModalOpen(false);
+            await api.post(`/admin/enrollments/student/${currentStudent.id}/class/${classToEnroll}`);
+            alert("Înscris cu succes!");
+            setInfoModalOpen(false); // Închidem ca să se facă refresh la date
             fetchFilteredUsers();
-        } catch (error) { alert("Eroare la inscriere."); }
+        } catch (e) { alert("Eroare la înscriere."); }
     };
 
-    const handleCreateWithEnroll = async () => {
-        if (!newStudent.firstName || !newStudent.lastName || !newStudent.email || !newStudent.password) {
-            return alert("Completeaza campurile obligatorii!");
+    const handleUnenroll = async (classId) => {
+        if(confirm("Sigur scoți studentul de la acest curs?")) {
+            try {
+                await api.delete(`/admin/enrollments/student/${currentStudent.id}/class/${classId}`);
+                alert("Dezabonat.");
+                setInfoModalOpen(false);
+                fetchFilteredUsers();
+            } catch (e) { alert("Eroare."); }
         }
-        try {
-            const res = await api.post('/users/student', newStudent);
-            const created = res.data;
-            if (selectedClasses.length > 0) {
-                await processBulkEnrollment(created.id, { ...created, phone: newStudent.phone });
-            }
-            alert("Student creat si inscris!");
-            setIsCreateModalOpen(false);
-            fetchFilteredUsers();
-        } catch (error) { alert("Eroare la creare."); }
     };
 
+    // 7. CREARE STUDENT
+    const handleCreateStudent = async () => {
+        try { await api.post('/users/student', newStudent); alert("Student Creat!"); setIsCreateModalOpen(false); fetchFilteredUsers(); } 
+        catch (e) { alert("Eroare creare."); }
+    };
+
+    // 8. STATISTICI
     const fetchStats = async (studentId, range) => {
-        try {
-            const res = await api.get(`/attendance/student/${studentId}/stats?range=${range}`);
-            setStudentStats(res.data);
-        } catch (error) { console.error("Eroare stats"); }
+        try { const res = await api.get(`/attendance/student/${studentId}/stats?range=${range}`); setStudentStats(res.data); } catch (e) {}
     };
 
-    const handleClassToggle = (id) => {
-        setSelectedClasses(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-    };
-
+    // --- RENDER ---
     return (
-        <div style={{ fontFamily: 'Georgia, serif' }}>
+        <div>
+            {/* HEADER */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h1 style={{margin:0}}>Gestionare Studenți</h1>
-                <button className="btn btn-primary" onClick={() => { setSelectedClasses([]); setIsCreateModalOpen(true); }}>+ Adaugă Student Nou</button>
+                <h1 style={{margin:0, fontFamily:'Georgia', color:'var(--c-primary)'}}>Gestionare Studenți</h1>
+                <button className="btn btn-primary" onClick={() => setIsCreateModalOpen(true)}>+ Adaugă Student</button>
             </div>
             
-            {/* Filtre */}
-            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: '25px', display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
-                <div style={{flex: 1}}><label style={labelStyle}>Caută nume</label><input className="input-field" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} style={{margin:0}} /></div>
-                <div style={{flex: 1}}><label style={labelStyle}>Status</label><select className="input-field" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{margin:0}}><option value="">Toți</option><option value="Active">Activ</option><option value="Inactive">Inactiv</option></select></div>
-                <div style={{flex: 1}}><label style={labelStyle}>Curs</label><select className="input-field" value={filters.courseId} onChange={e => setFilters({...filters, courseId: e.target.value})} style={{margin:0}}><option value="">Toate</option>{classes.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}</select></div>
+            {/* FILTRE */}
+            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '25px', alignItems:'flex-end', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
+                <div style={{flex:1, minWidth:'200px'}}><label style={labelStyle}>Nume</label><input className="input-field" placeholder="Căutare..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} style={{margin:0}}/></div>
+                <div style={{flex:1, minWidth:'150px'}}><label style={labelStyle}>Status</label><select className="input-field" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{margin:0}}><option value="">Toți</option><option value="Active">Activ</option><option value="Inactive">Inactiv</option></select></div>
                 <button className="btn btn-primary" onClick={fetchFilteredUsers}>🔍 Caută</button>
                 <button className="btn" style={{background:'#95a5a6', color:'white'}} onClick={handleResetFilters}>Reset</button>
             </div>
 
-            {/* Tabel Principal */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <thead style={{ backgroundColor: '#1A1A1A', color: 'white' }}>
-                    <tr>
-                        <th style={thStyle}>Student</th>
-                        <th style={thStyle}>Status / Expirare</th>
-                        <th style={thStyle}>Ultima Plată</th>
-                        <th style={thStyle}>Următoarea Plată</th>
-                        <th style={thStyle}>Acțiuni</th>
-                    </tr>
+            {/* TABEL */}
+            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '10px', overflow: 'hidden', boxShadow:'0 2px 10px rgba(0,0,0,0.05)' }}>
+                <thead style={{ backgroundColor: 'var(--c-primary)', color: 'white' }}>
+                    <tr><th style={{padding:'15px', textAlign:'left'}}>Student</th><th style={{padding:'15px', textAlign:'left'}}>Status</th><th style={{padding:'15px', textAlign:'left'}}>Cursuri</th><th style={{padding:'15px', textAlign:'center'}}>Acțiuni</th></tr>
                 </thead>
                 <tbody>
-                    {students.map(student => (
-                        <tr key={student.id} style={{ borderBottom: '1px solid #eee' }}>
-                            <td style={tdStyle}><strong>{student.firstName} {student.lastName}</strong><br/><small>{student.email}</small></td>
-                            <td style={tdStyle}>
-                                <span style={{ ...statusBadge, backgroundColor: student.status === 'Active' ? '#2ecc71' : '#e74c3c' }}>{student.status || 'Inactive'}</span>
-                                {student.subscriptionExpirationDate && <div style={{fontSize:'0.75rem', marginTop:'5px', color:'#888'}}>Până la: {student.subscriptionExpirationDate}</div>}
+                    {students.map(s => (
+                        <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+                            <td style={{padding:'15px'}}>
+                                <div style={{fontWeight:'bold', fontSize:'1rem'}}>{s.firstName} {s.lastName}</div>
+                                <div style={{fontSize:'0.8rem', color:'#888'}}>{s.email}</div>
                             </td>
-                            <td style={tdStyle}><b>{student.lastPaymentAmount || 0} RON</b></td>
-                            <td style={tdStyle}><b style={{color: '#e67e22'}}>{student.nextPaymentAmount || 0} RON</b></td>
-                            <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                <button className="btn" style={{ background: '#34495e', color: 'white' }} onClick={() => openInfoModal(student)}>ℹ️ Administrare</button>
+                            <td style={{padding:'15px'}}>
+                                <span style={{
+                                    padding:'5px 12px', borderRadius:'20px', fontSize:'0.75rem', fontWeight:'bold', textTransform:'uppercase',
+                                    backgroundColor: s.status === 'Active' ? '#e8f5e9' : '#ffebee',
+                                    color: s.status === 'Active' ? '#2ecc71' : '#e74c3c',
+                                    border: `1px solid ${s.status === 'Active' ? '#2ecc71' : '#e74c3c'}`
+                                }}>
+                                    {s.status === 'Active' ? 'ABONAMENT ACTIV' : 'EXPIRAT'}
+                                </span>
+                                {s.subscriptionExpirationDate && <div style={{fontSize:'0.75rem', marginTop:'5px', color:'#666'}}>Exp: {s.subscriptionExpirationDate}</div>}
+                            </td>
+                            <td style={{padding:'15px'}}>
+                                <div style={{display:'flex', gap:'5px', flexWrap:'wrap'}}>
+                                    {s.enrolledClasses && s.enrolledClasses.length > 0 ? 
+                                        s.enrolledClasses.map(c => <span key={c.id} style={{background:'#f0f0f0', padding:'3px 8px', borderRadius:'4px', fontSize:'0.8rem'}}>{c.title}</span>)
+                                        : <span style={{color:'#ccc', fontSize:'0.8rem'}}>-</span>
+                                    }
+                                </div>
+                            </td>
+                            <td style={{padding:'15px', textAlign:'center'}}>
+                                <button className="btn" style={{background:'#2c3e50', color:'white', fontSize:'0.85rem', padding:'8px 16px'}} onClick={() => openInfoModal(s)}>
+                                    📂 Detalii
+                                </button>
                             </td>
                         </tr>
                     ))}
                 </tbody>
             </table>
 
-            {/* MODAL CREARE + INSCRIERE */}
-            {isCreateModalOpen && (
+            {/* --- MODAL PRINCIPAL --- */}
+            {infoModalOpen && currentStudent && (
                 <div style={modalStyle}>
-                    <div style={{ ...modalContentStyle, maxWidth: '900px', padding: '0' }}>
-                        <div style={modalHeader}><h2>Adaugă Student Nou</h2><button style={closeBtn} onClick={() => setIsCreateModalOpen(false)}>&times;</button></div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', padding: '25px' }}>
+                    <div style={modalContentStyle}>
+                        
+                        {/* HEADER MODAL */}
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', paddingBottom:'15px', borderBottom:'1px solid #eee'}}>
                             <div>
-                                <h4>1. Date Personale</h4>
-                                <input className="input-field" placeholder="Prenume *" onChange={e => setNewStudent({...newStudent, firstName: e.target.value})} />
-                                <input className="input-field" placeholder="Nume *" onChange={e => setNewStudent({...newStudent, lastName: e.target.value})} />
-                                <input className="input-field" placeholder="Email *" onChange={e => setNewStudent({...newStudent, email: e.target.value})} />
-                                <input className="input-field" placeholder="Parolă *" type="password" onChange={e => setNewStudent({...newStudent, password: e.target.value})} />
-                                <input className="input-field" placeholder="Telefon" onChange={e => setNewStudent({...newStudent, phone: e.target.value})} />
+                                <h2 style={{margin:0, color:'var(--c-primary)'}}>{currentStudent.firstName} {currentStudent.lastName}</h2>
+                                <span style={{color:'#7f8c8d', fontSize:'0.9rem'}}>Panou Administrator</span>
                             </div>
-                            <div style={paymentSection}>
-                                <h4>2. Înscriere Cursuri</h4>
-                                <div style={listContainer}>
-                                    {classes.map(c => (
-                                        <label key={c.id} style={listItem}>
-                                            <input type="checkbox" checked={selectedClasses.includes(c.id)} onChange={() => handleClassToggle(c.id)} />
-                                            <div><b>{c.title}</b><br/><small>{c.schedule}</small></div>
-                                        </label>
-                                    ))}
-                                </div>
-                                <div style={{marginTop:'15px'}}>
-                                    <label style={labelStyle}>Perioadă</label>
-                                    <select className="input-field" value={enrollMonths} onChange={e => setEnrollMonths(e.target.value)}>
-                                        <option value="1">1 Lună</option><option value="2">2 Luni</option>
-                                    </select>
-                                    <label style={labelStyle}>Suma de încasat azi (Editabil)</label>
-                                    <input type="number" className="input-field" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
-                                    <button className="btn btn-primary" style={{ width: '100%', marginTop: '15px' }} onClick={handleCreateWithEnroll}>Creează Student</button>
-                                </div>
-                            </div>
+                            <button onClick={() => setInfoModalOpen(false)} style={{fontSize:'1.5rem', background:'none', border:'none', cursor:'pointer'}}>&times;</button>
                         </div>
+
+                        {/* NAV TABURI */}
+                        <div style={{display:'flex', gap:'10px', marginBottom:'25px', background:'#f8f9fa', padding:'5px', borderRadius:'8px'}}>
+                            <button style={activeTab === 'renewal' ? activeTabStyle : tabStyle} onClick={() => setActiveTab('renewal')}>💳 Reînnoire & Plăți</button>
+                            <button style={activeTab === 'enroll' ? activeTabStyle : tabStyle} onClick={() => setActiveTab('enroll')}>📝 Înscrieri Cursuri</button>
+                            <button style={activeTab === 'stats' ? activeTabStyle : tabStyle} onClick={() => {setActiveTab('stats'); fetchStats(currentStudent.id, 'MONTH')}}>📊 Prezență</button>
+                            <button style={activeTab === 'profile' ? activeTabStyle : tabStyle} onClick={() => setActiveTab('profile')}>👤 Editare Profil</button>
+                        </div>
+
+                        {/* === TAB 1: REÎNNOIRE (MAIN) === */}
+                        {activeTab === 'renewal' && (
+                            <div style={{display:'grid', gridTemplateColumns:'1fr 1.2fr', gap:'20px'}}>
+                                
+                                {/* STÂNGA: ISTORIC */}
+                                <div style={{background:'#f0f4f8', padding:'15px', borderRadius:'8px', height:'fit-content'}}>
+                                    <h4 style={{margin:'0 0 15px 0', color:'#2980b9', borderBottom:'1px solid #dae1e7', paddingBottom:'8px'}}>📜 Istoric Ultima Plată</h4>
+                                    
+                                    <div style={{marginBottom:'15px'}}>
+                                        <label style={{fontSize:'0.75rem', color:'#7f8c8d', display:'block'}}>SUMA PLĂTITĂ LUNA TRECUTĂ</label>
+                                        <div style={{fontSize:'1.4rem', fontWeight:'bold', color:'#2c3e50'}}>{currentStudent.lastPaymentAmount} RON</div>
+                                    </div>
+
+                                    <div style={{marginBottom:'15px'}}>
+                                        <label style={{fontSize:'0.75rem', color:'#7f8c8d', display:'block'}}>DATA EXPIRĂRII ANTERIOARE</label>
+                                        <div style={{fontSize:'1rem', fontWeight:'bold'}}>{currentStudent.subscriptionExpirationDate || 'N/A'}</div>
+                                    </div>
+
+                                    <div style={{background:'white', padding:'10px', borderRadius:'6px', border:'1px solid #dae1e7'}}>
+                                        <label style={{fontSize:'0.75rem', color:'#7f8c8d', display:'block', marginBottom:'3px'}}>DETALII PLATĂ ANTERIOARĂ</label>
+                                        <div style={{fontSize:'0.9rem', fontStyle:'italic', color:'#34495e'}}>
+                                            {currentStudent.lastPaymentComment || "Fără detalii salvate."}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* DREAPTA: ACȚIUNE */}
+                                <div style={{border:'1px solid #e0e0e0', padding:'20px', borderRadius:'8px', background:'white'}}>
+                                    <h4 style={{margin:'0 0 15px 0', color:'#27ae60', display:'flex', alignItems:'center', gap:'8px'}}>
+                                        💰 Încasează Abonament Nou
+                                    </h4>
+
+                                    {/* 1. SELECTOR CURSURI */}
+                                    <label style={{...labelStyle, color:'#333'}}>Pentru ce cursuri plătește azi?</label>
+                                    <div style={{display:'flex', flexDirection:'column', gap:'8px', marginBottom:'20px', maxHeight:'150px', overflowY:'auto', background:'#fafafa', padding:'10px', borderRadius:'6px', border:'1px solid #eee'}}>
+                                        {currentStudent.enrolledClasses && currentStudent.enrolledClasses.length > 0 ? (
+                                            currentStudent.enrolledClasses.map(cls => (
+                                                <label key={cls.id} style={{display:'flex', alignItems:'center', gap:'10px', cursor:'pointer'}}>
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={renewalData.selectedCourseIds.includes(cls.id)}
+                                                        onChange={() => toggleCourseSelection(cls.id)}
+                                                        style={{accentColor:'#27ae60', width:'16px', height:'16px'}}
+                                                    />
+                                                    <span style={{fontSize:'0.9rem'}}>{cls.title}</span>
+                                                </label>
+                                            ))
+                                        ) : <div style={{color:'#999', fontSize:'0.9rem'}}>⚠️ Studentul nu e înscris la niciun curs. Mergi la tab-ul "Înscrieri".</div>}
+                                    </div>
+
+                                    {/* 2. SUMA & DATA */}
+                                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', marginBottom:'15px'}}>
+                                        <div>
+                                            <label style={labelStyle}>Suma (RON)</label>
+                                            <input type="number" className="input-field" value={renewalData.amount} onChange={e => setRenewalData({...renewalData, amount: e.target.value})} placeholder="0" style={{borderColor:'#27ae60', fontWeight:'bold'}} />
+                                        </div>
+                                        <div>
+                                            <label style={labelStyle}>Valabil Până La</label>
+                                            <input type="date" className="input-field" value={renewalData.newExpirationDate} onChange={e => setRenewalData({...renewalData, newExpirationDate: e.target.value})} />
+                                        </div>
+                                    </div>
+
+                                    {/* 3. PREVIEW COMENTARIU */}
+                                    <div style={{marginBottom:'20px'}}>
+                                        <label style={labelStyle}>Notă automată (Se va salva la istoric)</label>
+                                        <textarea 
+                                            className="input-field" 
+                                            rows="2" 
+                                            value={renewalData.generatedComment} 
+                                            onChange={e => setRenewalData({...renewalData, generatedComment: e.target.value})}
+                                            style={{fontSize:'0.85rem', color:'#666', resize:'none'}}
+                                        />
+                                    </div>
+
+                                    <button onClick={handleRenewalSubmit} className="btn" style={{width:'100%', background:'#27ae60', color:'white', fontSize:'1rem', padding:'12px'}}>
+                                        CONFIRMĂ PLATA
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* === TAB 2: ÎNSCRIERI (FILTRATE) === */}
+                        {activeTab === 'enroll' && (
+                            <div>
+                                <h4 style={{marginTop:0}}>Cursuri la care participă activ:</h4>
+                                <div style={{display:'flex', flexWrap:'wrap', gap:'10px', marginBottom:'30px'}}>
+                                    {currentStudent.enrolledClasses && currentStudent.enrolledClasses.length > 0 ? 
+                                        currentStudent.enrolledClasses.map(c => (
+                                            <div key={c.id} style={{background:'white', border:'1px solid #ddd', padding:'8px 12px', borderRadius:'6px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                <strong>{c.title}</strong>
+                                                <button onClick={() => handleUnenroll(c.id)} style={{color:'#e74c3c', background:'none', border:'none', cursor:'pointer', fontSize:'1.2rem', lineHeight:1}} title="Scoate de la curs">&times;</button>
+                                            </div>
+                                        )) : <p style={{color:'#7f8c8d'}}>Nu este înscris la niciun curs.</p>
+                                    }
+                                </div>
+
+                                <div style={{background:'#f8f9fa', padding:'20px', borderRadius:'8px', border:'1px solid #eee'}}>
+                                    <h4 style={{margin:'0 0 15px 0', color:'#2c3e50'}}>Înscrie la un curs nou</h4>
+                                    
+                                    {availableClasses.length > 0 ? (
+                                        <div style={{display:'flex', gap:'10px'}}>
+                                            <select className="input-field" style={{margin:0}} value={classToEnroll} onChange={e => setClassToEnroll(e.target.value)}>
+                                                <option value="">-- Selectează Curs Disponibil --</option>
+                                                {availableClasses.map(c => (
+                                                    <option key={c.id} value={c.id}>{c.title} ({c.schedule})</option>
+                                                ))}
+                                            </select>
+                                            <button className="btn btn-primary" onClick={handleEnroll}>Adaugă</button>
+                                        </div>
+                                    ) : (
+                                        <div style={{color:'#27ae60', fontWeight:'bold', textAlign:'center', padding:'10px'}}>
+                                            🎉 Studentul este deja înscris la toate cursurile disponibile!
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* === TAB 3: STATISTICI === */}
+                        {activeTab === 'stats' && (
+                            <div>
+                                <div style={{display:'flex', gap:'10px', justifyContent:'center', marginBottom:'20px'}}>
+                                    <button onClick={() => fetchStats(currentStudent.id, 'WEEK')} style={{...filterBtn, background: 'white'}}>Săptămână</button>
+                                    <button onClick={() => fetchStats(currentStudent.id, 'MONTH')} style={{...filterBtn, background: 'var(--c-primary)', color:'white'}}>Lună</button>
+                                </div>
+                                {studentStats ? (
+                                    <div style={{textAlign:'center'}}>
+                                        <div style={{fontSize:'3rem', fontWeight:'bold', color: studentStats.attendanceRate > 50 ? '#2ecc71' : '#e74c3c'}}>
+                                            {studentStats.attendanceRate.toFixed(0)}%
+                                        </div>
+                                        <p style={{color:'#7f8c8d'}}>Rată de Prezență</p>
+                                        <div style={{textAlign:'left', marginTop:'20px', maxHeight:'200px', overflowY:'auto', border:'1px solid #eee', borderRadius:'8px'}}>
+                                            {studentStats.history.map((h, i) => (
+                                                <div key={i} style={{padding:'10px', borderBottom:'1px solid #eee', display:'flex', justifyContent:'space-between'}}>
+                                                    <span>{h.className} <small>({h.date})</small></span>
+                                                    <span style={{color: h.present ? '#2ecc71' : '#e74c3c', fontWeight:'bold'}}>{h.present ? 'PREZENT' : 'ABSENT'}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : <p style={{textAlign:'center'}}>Se încarcă...</p>}
+                            </div>
+                        )}
+
+                        {/* === TAB 4: PROFIL === */}
+                        {activeTab === 'profile' && (
+                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px'}}>
+                                <div><label style={labelStyle}>Prenume</label><input className="input-field" value={editingData.firstName} onChange={e => setEditingData({...editingData, firstName: e.target.value})} /></div>
+                                <div><label style={labelStyle}>Nume</label><input className="input-field" value={editingData.lastName} onChange={e => setEditingData({...editingData, lastName: e.target.value})} /></div>
+                                <div style={{gridColumn:'1/-1'}}><label style={labelStyle}>Telefon</label><input className="input-field" value={editingData.phone} onChange={e => setEditingData({...editingData, phone: e.target.value})} /></div>
+                                <div style={{gridColumn:'1/-1', textAlign:'right', marginTop:'15px'}}>
+                                    <button className="btn btn-primary" onClick={handleUpdateProfile}>Salvează Modificări</button>
+                                </div>
+                            </div>
+                        )}
+
                     </div>
                 </div>
             )}
 
-            {/* MODAL ADMINISTRARE */}
-            {infoModalOpen && currentStudent && (
+            {/* MODAL CREARE STUDENT */}
+            {isCreateModalOpen && (
                 <div style={modalStyle}>
-                    <div style={{ ...modalContentStyle, maxWidth:'850px', padding:'0' }}>
-                        <div style={modalHeader}><h2>{currentStudent.firstName} {currentStudent.lastName}</h2><button style={closeBtn} onClick={() => setInfoModalOpen(false)}>&times;</button></div>
-                        <div style={tabContainer}>
-                            <button style={activeTab === 'profile' ? activeTabStyle : tabStyle} onClick={() => handleTabChange('profile')}>👤 Profil & Abonamente</button>
-                            <button style={activeTab === 'enroll' ? activeTabStyle : tabStyle} onClick={() => handleTabChange('enroll')}>💃 Înscriere & Plată Acum</button>
-                            <button style={activeTab === 'stats' ? activeTabStyle : tabStyle} onClick={() => handleTabChange('stats')}>📊 Statistici</button>
+                    <div style={{...modalContentStyle, maxWidth:'500px'}}>
+                        <h2 style={{marginTop:0}}>Student Nou</h2>
+                        <div style={{display:'grid', gap:'10px'}}>
+                            <input className="input-field" placeholder="Prenume" value={newStudent.firstName} onChange={e => setNewStudent({...newStudent, firstName: e.target.value})} />
+                            <input className="input-field" placeholder="Nume" value={newStudent.lastName} onChange={e => setNewStudent({...newStudent, lastName: e.target.value})} />
+                            <input className="input-field" placeholder="Email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} />
+                            <input className="input-field" placeholder="Telefon" value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} />
+                            <input className="input-field" type="password" placeholder="Parola" value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} />
+                            <label style={labelStyle}>Data Expirare (Opțional)</label>
+                            <input className="input-field" type="date" value={newStudent.subscriptionExpirationDate} onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})} />
                         </div>
-
-                        <div style={{padding:'25px'}}>
-                            {activeTab === 'profile' && (
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                                        <div><label style={labelStyle}>Prenume</label><input className="input-field" value={editingData.firstName} onChange={e => setEditingData({...editingData, firstName: e.target.value})} /></div>
-                                        <div><label style={labelStyle}>Nume</label><input className="input-field" value={editingData.lastName} onChange={e => setEditingData({...editingData, lastName: e.target.value})} /></div>
-                                    </div>
-
-                                    <h4>Abonamente active per curs</h4>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                        {currentStudent.enrolledClasses?.map(cls => (
-                                            <div key={cls.id} style={subscriptionItem}>
-                                                <div><b>{cls.title}</b><br/><small>{cls.schedule}</small></div>
-                                                <div style={{ textAlign: 'right' }}>
-                                                    <label style={{ fontSize: '0.7rem', display: 'block' }}>Expiră la:</label>
-                                                    <input type="date" className="input-field" style={{width:'auto', margin:0}} 
-                                                           value={editingData.subscriptionExpirationDate} 
-                                                           onChange={e => setEditingData({...editingData, subscriptionExpirationDate: e.target.value})} />
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    <div style={{background: '#fff9f4', padding: '15px', borderRadius: '8px', border: '1px solid #ffeada'}}>
-                                        <label style={{...labelStyle, color: '#e67e22'}}>Suma Următoarei Plăți (RON)</label>
-                                        <input type="number" className="input-field" value={editingData.nextPaymentAmount} onChange={e => setEditingData({...editingData, nextPaymentAmount: e.target.value})} style={{margin: 0, fontWeight: 'bold', border: '1px solid #e67e22'}} />
-                                    </div>
-                                    <div style={{textAlign:'right'}}><button className="btn btn-primary" onClick={handleUpdateStudent}>Salvează Modificări</button></div>
-                                </div>
-                            )}
-
-                            {activeTab === 'enroll' && (
-                                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'30px'}}>
-                                    <div>
-                                        <h4>Selectează Cursuri Noi:</h4>
-                                        <div style={listContainer}>
-                                            {classes.map(c => (
-                                                <label key={c.id} style={listItem}>
-                                                    <input type="checkbox" checked={selectedClasses.includes(c.id)} onChange={() => handleClassToggle(c.id)} />
-                                                    <div><b>{c.title}</b><br/><small>{c.schedule}</small></div>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div style={paymentSection}>
-                                        <h4>Detalii Plată Acum</h4>
-                                        <label style={labelStyle}>Perioadă</label>
-                                        <select className="input-field" value={enrollMonths} onChange={e => setEnrollMonths(e.target.value)}>
-                                            <option value="1">1 Lună</option><option value="2">2 Luni</option>
-                                        </select>
-                                        <label style={labelStyle}>Sumă primită azi</label>
-                                        <input type="number" className="input-field" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
-                                        <textarea className="input-field" placeholder="Motiv discount..." value={discountComment} onChange={e => setDiscountComment(e.target.value)} style={{height:'60px', resize:'none'}} />
-                                        <button className="btn btn-primary" style={{width:'100%'}} onClick={handleAdminEnroll}>Confirmă Înscrierea & Plata</button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {activeTab === 'stats' && (
-                                <div>
-                                    <div style={{display:'flex', gap:'10px', marginBottom:'20px', justifyContent:'center'}}>
-                                        <button onClick={() => { setStatsRange('WEEK'); fetchStats(currentStudent.id, 'WEEK'); }} style={statsRange === 'WEEK' ? activeFilterBtn : filterBtn}>Săptămână</button>
-                                        <button onClick={() => { setStatsRange('MONTH'); fetchStats(currentStudent.id, 'MONTH'); }} style={statsRange === 'MONTH' ? activeFilterBtn : filterBtn}>Lună</button>
-                                    </div>
-                                    {studentStats ? (
-                                        <>
-                                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'15px', marginBottom:'20px'}}>
-                                                <div style={statCardStyle}><small>Rată</small><div style={{fontSize:'1.5rem', fontWeight:'bold'}}>{studentStats.attendanceRate.toFixed(1)}%</div></div>
-                                                <div style={statCardStyle}><small>Prezențe</small><div style={{fontSize:'1.5rem', fontWeight:'bold'}}>{studentStats.attendedClasses}</div></div>
-                                                <div style={statCardStyle}><small>Absențe</small><div style={{fontSize:'1.5rem', fontWeight:'bold'}}>{studentStats.totalClasses - studentStats.attendedClasses}</div></div>
-                                            </div>
-                                            <div style={{maxHeight:'200px', overflowY:'auto', background:'#f9f9f9', padding:'10px', borderRadius:'8px'}}>
-                                                {studentStats.history.map((rec, i) => (
-                                                    <div key={i} style={{display:'flex', justifyContent:'space-between', padding:'8px', borderBottom:'1px solid #eee'}}>
-                                                        <span>{rec.className} ({rec.date})</span>
-                                                        <span style={{color: rec.present ? 'green' : 'red', fontWeight:'bold'}}>{rec.present ? 'PREZENT' : 'ABSENT'}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </>
-                                    ) : <p style={{textAlign:'center'}}>Se încarcă...</p>}
-                                </div>
-                            )}
+                        <div style={{marginTop:'20px', display:'flex', justifyContent:'flex-end', gap:'10px'}}>
+                            <button className="btn" style={{background:'#ccc'}} onClick={() => setIsCreateModalOpen(false)}>Anulează</button>
+                            <button className="btn btn-primary" onClick={handleCreateStudent}>Creează</button>
                         </div>
                     </div>
                 </div>
@@ -342,22 +481,10 @@ function StudentsView() {
 
 // STILURI
 const modalStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' };
-const modalContentStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '12px', width: '90%', boxShadow: '0 5px 20px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' };
-const modalHeader = { padding: '20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8f9fa' };
-const closeBtn = { background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' };
-const tabContainer = { display: 'flex', borderBottom: '1px solid #ddd' };
-const tabStyle = { flex:1, padding:'15px', background:'none', border:'none', cursor:'pointer', borderBottom:'3px solid transparent', fontWeight:'bold', color:'#7f8c8d' };
-const activeTabStyle = { ...tabStyle, color:'#FF7033', borderBottom:'3px solid #FF7033' };
-const labelStyle = { display:'block', fontSize:'0.8rem', fontWeight:'bold', color:'#555', marginBottom:'3px' };
-const statusBadge = { padding: '5px 12px', borderRadius: '15px', fontSize: '0.8rem', fontWeight: 'bold', color: 'white' };
-const thStyle = { padding: '15px', textAlign: 'left' };
-const tdStyle = { padding: '15px', borderBottom: '1px solid #eee' };
-const listContainer = { border: '1px solid #eee', borderRadius: '8px', maxHeight: '250px', overflowY: 'auto' };
-const listItem = { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' };
-const paymentSection = { background: '#fcfcfc', padding: '20px', borderRadius: '10px', border: '1px solid #eee' };
-const subscriptionItem = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f9f9f9', borderRadius: '8px', border: '1px solid #eee', marginBottom: '10px' };
-const statCardStyle = { background: '#f8f9fa', padding: '10px', borderRadius: '8px', textAlign: 'center', border: '1px solid #eee' };
-const filterBtn = { border: '1px solid #ddd', background: 'white', padding: '6px 12px', borderRadius: '20px', cursor: 'pointer' };
-const activeFilterBtn = { ...filterBtn, background: '#1A1A1A', color: 'white' };
+const modalContentStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' };
+const tabStyle = { flex:1, padding:'10px', background:'transparent', border:'none', cursor:'pointer', borderBottom:'3px solid transparent', fontWeight:'600', color:'#7f8c8d', transition:'all 0.2s' };
+const activeTabStyle = { ...tabStyle, color:'var(--c-primary)', borderBottom:'3px solid var(--c-primary)', background:'#fff' };
+const labelStyle = { display:'block', fontSize:'0.8rem', fontWeight:'bold', color:'#555', marginBottom:'5px', textTransform:'uppercase', letterSpacing:'0.5px' };
+const filterBtn = { border:'1px solid #ddd', padding:'6px 15px', borderRadius:'20px', cursor:'pointer', fontWeight:'bold' };
 
 export default StudentsView;
