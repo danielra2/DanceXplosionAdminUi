@@ -5,9 +5,14 @@ function StudentsView() {
     // --- STATE DATE ---
     const [students, setStudents] = useState([]);
     const [classes, setClasses] = useState([]);
+    const [paymentHistory, setPaymentHistory] = useState([]);
     
     // --- STATE FILTRE ---
     const [filters, setFilters] = useState({ search: '', status: '', courseId: '' });
+    
+    // --- STATE SORTARE ---
+    const [sortBy, setSortBy] = useState(null);
+    const [sortOrder, setSortOrder] = useState('asc');
 
     // --- STATE MODAL INFO ---
     const [infoModalOpen, setInfoModalOpen] = useState(false);
@@ -20,12 +25,16 @@ function StudentsView() {
     // Statistici
     const [studentStats, setStudentStats] = useState(null);
     
+    const DEFAULT_COURSE_PRICE = 200;
+    const PAYMENT_HISTORY_KEY = 'paymentHistoryByStudent';
+
     // Înscriere Curs Nou (ACTUALIZATĂ CU DATE DE PLATĂ)
     const [enrollmentData, setEnrollmentData] = useState({
         classId: '',
         amount: '',
         expirationDate: '',
-        comment: ''
+        enrollmentNote: '',
+        discountNote: ''
     });
 
     // --- STATE REÎNNOIRE ---
@@ -33,7 +42,8 @@ function StudentsView() {
         amount: '',
         courseExpirations: {}, // { courseId: expirationDate, ... }
         selectedCourseIds: [],
-        generatedComment: ''
+        renewalNote: '',
+        discountNote: ''
     });
 
     // --- STATE CREARE STUDENT ---
@@ -44,7 +54,9 @@ function StudentsView() {
         subscriptionExpirationDate: '', 
         lastPaymentAmount: '', 
         lastPaymentComment: '', // Câmp pentru notă reducere
-        enrolledClassIds: []
+        enrolledClassIds: [],
+        enrollmentNote: '',
+        discountNote: ''
     });
 
     // 1. ÎNCĂRCARE DATE
@@ -70,12 +82,48 @@ function StudentsView() {
 
     const handleResetFilters = () => {
         setFilters({ search: '', status: '', courseId: '' });
+        setSortBy(null);
         api.get('/users').then(res => setStudents(res.data.userList || res.data));
+    };
+
+    const getSortedStudents = () => {
+        let sorted = [...students];
+        
+        if (sortBy === 'student') {
+            sorted.sort((a, b) => {
+                const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
+                const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+                return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+            });
+        } else if (sortBy === 'courses') {
+            sorted.sort((a, b) => {
+                const getNextExpiration = (student) => {
+                    if (!student.enrolledClasses || student.enrolledClasses.length === 0) {
+                        return new Date('9999-12-31');
+                    }
+                    return Math.min(...student.enrolledClasses.map(c => new Date(c.expirationDate || '9999-12-31').getTime()));
+                };
+                const dateA = getNextExpiration(a);
+                const dateB = getNextExpiration(b);
+                return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+            });
+        }
+        return sorted;
+    };
+
+    const handleHeaderClick = (column) => {
+        if (sortBy === column) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortBy(column);
+            setSortOrder('asc');
+        }
     };
 
     // 2. CONFIGURARE MODAL (DESCHIDERE)
     const openInfoModal = (student) => {
         setCurrentStudent(student);
+        setPaymentHistory(loadPaymentHistory(student));
         
         setEditingData({
             id: student.id,
@@ -92,9 +140,10 @@ function StudentsView() {
         
         setEnrollmentData({
             classId: '',
-            amount: '',
+            amount: '200',
             expirationDate: currentExp,
-            comment: ''
+            enrollmentNote: '',
+            discountNote: ''
         });
 
         const allEnrolledIds = student.enrolledClasses ? student.enrolledClasses.map(c => c.id) : [];
@@ -109,10 +158,11 @@ function StudentsView() {
         }
         
         setRenewalData({
-            amount: student.nextPaymentAmount > 0 ? student.nextPaymentAmount : '',
+            amount: student.nextPaymentAmount > 0 ? student.nextPaymentAmount : '200',
             courseExpirations: courseExpirations,
             selectedCourseIds: [],
-            generatedComment: ''
+            renewalNote: '',
+            discountNote: ''
         });
 
         setActiveTab('renewal'); 
@@ -136,7 +186,7 @@ function StudentsView() {
             return { 
                 ...prev, 
                 selectedCourseIds: newSelection,
-                generatedComment: selectedNames ? `Reînnoire: ${selectedNames}` : ""
+                renewalNote: selectedNames ? `Reînnoire: ${selectedNames}` : ""
             };
         });
     };
@@ -170,9 +220,49 @@ function StudentsView() {
             await Promise.all(renewalPromises);
 
             // Salvează doar metadata de plată (fără să suprascrie alte cursuri)
+            const selectedCourses = currentStudent.enrolledClasses
+                .filter(c => renewalData.selectedCourseIds.includes(c.id))
+                .map(c => ({ id: c.id, title: c.title }));
+
+            const totalPaid = parseAmount(renewalData.amount);
+            const courseCount = selectedCourses.length;
+
+            const clearedHistory = paymentHistory.map(entry => ({
+                ...entry,
+                amountPaid: entry.kind === 'enroll' || entry.kind === 'renewal' ? DEFAULT_COURSE_PRICE : entry.amountPaid,
+                discountAmount: 0,
+                discountNote: ''
+            }));
+
+            const newPayments = selectedCourses.map((course, index) => {
+                const isLast = index === courseCount - 1;
+                const amountPaid = isLast
+                    ? Math.max(0, totalPaid - (courseCount - 1) * DEFAULT_COURSE_PRICE)
+                    : DEFAULT_COURSE_PRICE;
+                const discountAmount = isLast
+                    ? Math.max(0, courseCount * DEFAULT_COURSE_PRICE - totalPaid)
+                    : 0;
+
+                const reasonNote = renewalData.renewalNote || `Reînnoire: ${course.title}`;
+                const discountNote = isLast ? renewalData.discountNote : '';
+
+                return buildPaymentEntry({
+                    kind: 'renewal',
+                    courses: [course],
+                    amountPaid,
+                    discountAmount,
+                    reasonNote,
+                    discountNote
+                });
+            });
+
+            const updatedHistory = [...clearedHistory, ...newPayments];
+            savePaymentHistory(currentStudent.id, updatedHistory);
+            setPaymentHistory(updatedHistory);
+
             const paymentPayload = {
-                lastPaymentAmount: parseFloat(renewalData.amount),
-                lastPaymentComment: renewalData.generatedComment
+                lastPaymentAmount: totalPaid,
+                lastPaymentComment: renewalData.renewalNote || (selectedCourses.length > 0 ? `Reînnoire: ${selectedCourses.map(c => c.title).join(', ')}` : '')
             };
             await api.put(`/admin/users/${currentStudent.id}`, paymentPayload);
 
@@ -207,12 +297,35 @@ function StudentsView() {
         try {
             await api.post(`/admin/enrollments/student/${currentStudent.id}/class/${enrollmentData.classId}?expirationDate=${enrollmentData.expirationDate}`);
             const selectedClassName = classes.find(c => c.id === parseInt(enrollmentData.classId))?.title;
-            const finalComment = enrollmentData.comment || `Înscriere curs nou: ${selectedClassName}`;
+            const finalEnrollmentNote = enrollmentData.enrollmentNote || `Înscriere student la cursul: ${selectedClassName}`;
+            const amountPaid = parseAmount(enrollmentData.amount);
+            const discountAmount = Math.max(0, DEFAULT_COURSE_PRICE - amountPaid);
+
+            const existingHistory = loadPaymentHistory(currentStudent);
+            const clearedHistory = existingHistory.map(entry => ({
+                ...entry,
+                amountPaid: entry.kind === 'enroll' || entry.kind === 'renewal' ? DEFAULT_COURSE_PRICE : entry.amountPaid,
+                discountAmount: 0,
+                discountNote: ''
+            }));
+
+            const newPayment = buildPaymentEntry({
+                kind: 'enroll',
+                courses: selectedClassName ? [{ id: parseInt(enrollmentData.classId), title: selectedClassName }] : [],
+                amountPaid,
+                discountAmount,
+                reasonNote: finalEnrollmentNote,
+                discountNote: enrollmentData.discountNote
+            });
+
+            const updatedHistory = [...clearedHistory, newPayment];
+            savePaymentHistory(currentStudent.id, updatedHistory);
+            setPaymentHistory(updatedHistory);
 
             const paymentPayload = {
                 subscriptionExpirationDate: enrollmentData.expirationDate,
-                lastPaymentAmount: enrollmentData.amount ? parseFloat(enrollmentData.amount) : 0,
-                lastPaymentComment: finalComment
+                lastPaymentAmount: amountPaid,
+                lastPaymentComment: finalEnrollmentNote
             };
 
             await api.put(`/admin/users/${currentStudent.id}`, paymentPayload);
@@ -240,24 +353,74 @@ function StudentsView() {
     const toggleNewStudentCourse = (courseId) => {
         setNewStudent(prev => {
             const isSelected = prev.enrolledClassIds.includes(courseId);
+            const newIds = isSelected 
+                ? prev.enrolledClassIds.filter(id => id !== courseId) 
+                : [...prev.enrolledClassIds, courseId];
+            
+            // Auto-generează comentariul cu numele cursurilor selectate
+            const selectedCourseNames = classes
+                .filter(c => newIds.includes(c.id))
+                .map(c => c.title)
+                .join(', ');
+            
+            const autoComment = selectedCourseNames ? `Înscriere student la cursul: ${selectedCourseNames}` : '';
+            
             return { 
                 ...prev, 
-                enrolledClassIds: isSelected 
-                    ? prev.enrolledClassIds.filter(id => id !== courseId) 
-                    : [...prev.enrolledClassIds, courseId] 
+                enrolledClassIds: newIds,
+                lastPaymentAmount: newIds.length > 0 ? '200' : '',
+                lastPaymentComment: autoComment,
+                enrollmentNote: autoComment
             };
         });
     };
 
     const handleCreateStudent = async () => {
         try { 
-            await api.post('/users/student', newStudent); 
+            const payload = {
+                ...newStudent,
+                lastPaymentComment: newStudent.enrollmentNote || newStudent.lastPaymentComment
+            };
+            const res = await api.post('/users/student', payload); 
+            const createdId = res?.data?.id || res?.data?.user?.id;
+
+            if (createdId && newStudent.enrolledClassIds.length > 0) {
+                const selectedCourses = classes.filter(c => newStudent.enrolledClassIds.includes(c.id));
+                const totalPaid = parseAmount(newStudent.lastPaymentAmount);
+                const courseCount = selectedCourses.length;
+
+                const historyEntries = selectedCourses.map((course, index) => {
+                    const isLast = index === courseCount - 1;
+                    const amountPaid = isLast
+                        ? Math.max(0, totalPaid - (courseCount - 1) * DEFAULT_COURSE_PRICE)
+                        : DEFAULT_COURSE_PRICE;
+                    const discountAmount = isLast
+                        ? Math.max(0, courseCount * DEFAULT_COURSE_PRICE - totalPaid)
+                        : 0;
+
+                    const reasonNote = newStudent.enrollmentNote || `Înscriere student la cursul: ${course.title}`;
+                    const discountNote = isLast ? newStudent.discountNote : '';
+
+                    return buildPaymentEntry({
+                        kind: 'enroll',
+                        courses: [{ id: course.id, title: course.title }],
+                        amountPaid,
+                        discountAmount,
+                        reasonNote,
+                        discountNote
+                    });
+                });
+
+                savePaymentHistory(createdId, historyEntries);
+            }
+
             alert("Student Creat!"); 
             setIsCreateModalOpen(false); 
             setShowNewStudentCourses(false);
             setNewStudent({
                 firstName: '', lastName: '', email: '', password: '', phone: '',
-                subscriptionExpirationDate: '', lastPaymentAmount: '', lastPaymentComment: '', enrolledClassIds: []
+                subscriptionExpirationDate: '', lastPaymentAmount: '', lastPaymentComment: '', enrolledClassIds: [],
+                enrollmentNote: '', discountNote: ''
             });
             fetchFilteredUsers(); 
         } catch (e) { alert("Eroare la creare."); }
@@ -271,16 +434,109 @@ function StudentsView() {
         } catch (e) {}
     };
 
+    // FUNCȚIE FORMATARE DATĂ EUROPEAN (dd.mm.yyyy)
+    const formatDateEU = (dateString) => {
+        if (!dateString) return 'Fără dată';
+        const date = new Date(dateString);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}.${month}.${year}`;
+    };
+
+    // CONVERTIRE YYYY-MM-DD la dd.mm.yyyy
+    const formatDateInput = (dateString) => {
+        if (!dateString) return '';
+        const parts = dateString.split('-');
+        if (parts.length === 3) {
+            return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        }
+        return dateString;
+    };
+
+    // CONVERTIRE dd.mm.yyyy la YYYY-MM-DD
+    const formatDateToISO = (dateString) => {
+        if (!dateString) return '';
+        const parts = dateString.split('.');
+        if (parts.length === 3) {
+            return `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+        return dateString;
+    };
+
+    const parseAmount = (value) => {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const loadPaymentHistory = (student) => {
+        if (!student?.id) return [];
+        let map = {};
+        try {
+            map = JSON.parse(localStorage.getItem(PAYMENT_HISTORY_KEY) || '{}');
+        } catch (e) {
+            map = {};
+        }
+        const history = Array.isArray(map[student.id]) ? map[student.id] : [];
+        if (history.length > 0) return history;
+
+        if (student.lastPaymentAmount || student.lastPaymentComment) {
+            const courseTitles = (student.enrolledClasses || []).map(c => ({ id: c.id, title: c.title }));
+            return [
+                {
+                    id: `legacy-${student.id}`,
+                    date: new Date().toISOString(),
+                    kind: 'legacy',
+                    courses: courseTitles.slice(0, 1),
+                    amountPaid: parseAmount(student.lastPaymentAmount),
+                    discountAmount: 0,
+                    reasonNote: student.lastPaymentComment || '',
+                    discountNote: ''
+                }
+            ];
+        }
+
+        return [];
+    };
+
+    const savePaymentHistory = (studentId, history) => {
+        if (!studentId) return;
+        let map = {};
+        try {
+            map = JSON.parse(localStorage.getItem(PAYMENT_HISTORY_KEY) || '{}');
+        } catch (e) {
+            map = {};
+        }
+        map[studentId] = history.slice(-50);
+        localStorage.setItem(PAYMENT_HISTORY_KEY, JSON.stringify(map));
+    };
+
+    const buildPaymentEntry = ({ kind, courses, amountPaid, discountAmount, reasonNote, discountNote }) => ({
+        id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        date: new Date().toISOString(),
+        kind,
+        courses,
+        amountPaid,
+        discountAmount,
+        reasonNote,
+        discountNote
+    });
+
+    const recentPayments = paymentHistory
+        .slice()
+        .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
+        .slice(0, 3);
+
     return (
         <div>
             {/* HEADER */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div className="students-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h1 style={{margin:0, fontFamily:'Georgia', color:'var(--c-primary)'}}>Gestionare Studenți</h1>
                 <button className="btn btn-primary" onClick={() => setIsCreateModalOpen(true)}>+ Adaugă Student</button>
             </div>
             
             {/* FILTRE */}
-            <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '25px', alignItems:'flex-end', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
+            <div className="students-filters" style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '25px', alignItems:'flex-end', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
                 <div style={{flex:1, minWidth:'200px'}}><label style={labelStyle}>Nume</label><input className="input-field" placeholder="Căutare..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} style={{margin:0}}/></div>
                 <div style={{flex:1, minWidth:'150px'}}><label style={labelStyle}>Status</label><select className="input-field" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{margin:0}}><option value="">Toți</option><option value="Active">Activ</option><option value="Inactive">Inactiv</option></select></div>
                 <button className="btn btn-primary" onClick={fetchFilteredUsers}>🔍 Caută</button>
@@ -288,64 +544,76 @@ function StudentsView() {
             </div>
 
             {/* TABEL */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '10px', overflow: 'hidden', boxShadow:'0 2px 10px rgba(0,0,0,0.05)' }}>
-                <thead style={{ backgroundColor: 'var(--c-primary)', color: 'white' }}>
-                    <tr><th style={{padding:'15px', textAlign:'left'}}>Student</th><th style={{padding:'15px', textAlign:'left'}}>Status</th><th style={{padding:'15px', textAlign:'left'}}>Cursuri</th><th style={{padding:'15px', textAlign:'center'}}>Acțiuni</th></tr>
-                </thead>
-                <tbody>
-                    {students.map(s => (
-                        <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
-                            <td style={{padding:'15px'}}>
-                                <div style={{fontWeight:'bold', fontSize:'1rem'}}>{s.firstName} {s.lastName}</div>
-                                <div style={{fontSize:'0.8rem', color:'#888'}}>{s.email}</div>
-                            </td>
-                            <td style={{padding:'15px'}}>
-                                <span style={{
-                                    padding:'5px 12px', borderRadius:'20px', fontSize:'0.75rem', fontWeight:'bold', textTransform:'uppercase',
-                                    backgroundColor: s.status === 'Active' ? '#e8f5e9' : '#ffebee',
-                                    color: s.status === 'Active' ? '#2ecc71' : '#e74c3c',
-                                    border: `1px solid ${s.status === 'Active' ? '#2ecc71' : '#e74c3c'}`
-                                }}>
-                                    {s.status === 'Active' ? 'ABONAMENT ACTIV' : 'EXPIRAT'}
-                                </span>
-                            </td>
-
-                            <td style={{padding:'15px'}}>
-                                <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
-                                    {s.enrolledClasses && s.enrolledClasses.length > 0 ? 
-                                        s.enrolledClasses.map(c => (
-                                            <div key={c.id} style={{
-                                                background:'#f8f9fa', 
-                                                border: '1px solid #ddd', 
-                                                padding:'4px 8px', 
-                                                borderRadius:'6px',
-                                                display: 'flex',
-                                                flexDirection: 'column'
-                                            }}>
-                                                <span style={{fontSize:'0.85rem', fontWeight:'600'}}>{c.title}</span>
-                                                <span style={{fontSize:'0.7rem', color:'#666'}}>
-                                                    Exp: {c.expirationDate || 'Fără dată'}
-                                                </span>
-                                            </div>
-                                        ))
-                                        : <span style={{color:'#ccc', fontSize:'0.8rem'}}>-</span>
-                                    }
-                                </div>
-                            </td>
-                            <td style={{padding:'15px', textAlign:'center'}}>
-                                <button className="btn" style={{background:'#2c3e50', color:'white', fontSize:'0.85rem', padding:'8px 16px'}} onClick={() => openInfoModal(s)}>
-                                    📂 Detalii
-                                </button>
-                            </td>
+            <div className="students-table-wrap">
+                <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '10px', overflow: 'hidden', boxShadow:'0 2px 10px rgba(0,0,0,0.05)' }}>
+                    <thead style={{ backgroundColor: 'var(--c-primary)', color: 'white' }}>
+                        <tr>
+                            <th style={{padding:'15px', textAlign:'left', cursor:'pointer', userSelect:'none'}} onClick={() => handleHeaderClick('student')}>
+                                Student {sortBy === 'student' && (sortOrder === 'asc' ? '↑' : '↓')}
+                            </th>
+                            <th style={{padding:'15px', textAlign:'left'}}>Status</th>
+                            <th style={{padding:'15px', textAlign:'left', cursor:'pointer', userSelect:'none'}} onClick={() => handleHeaderClick('courses')}>
+                                Cursuri {sortBy === 'courses' && (sortOrder === 'asc' ? '↑ (îndepărtat)' : '↓ (apropiat)')}
+                            </th>
+                            <th style={{padding:'15px', textAlign:'center'}}>Acțiuni</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {getSortedStudents().map(s => (
+                            <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+                                <td data-label="Student" style={{padding:'15px'}}>
+                                    <div style={{fontWeight:'bold', fontSize:'1rem'}}>{s.firstName} {s.lastName}</div>
+                                    <div style={{fontSize:'0.8rem', color:'#888'}}>{s.email}</div>
+                                    {s.phone && <div style={{fontSize:'0.8rem', color:'#555'}}>📞 {s.phone}</div>}
+                                </td>
+                                <td data-label="Status" style={{padding:'15px'}}>
+                                    <span style={{
+                                        padding:'5px 12px', borderRadius:'20px', fontSize:'0.75rem', fontWeight:'bold', textTransform:'uppercase',
+                                        backgroundColor: s.status === 'Active' ? '#e8f5e9' : '#ffebee',
+                                        color: s.status === 'Active' ? '#2ecc71' : '#e74c3c',
+                                        border: `1px solid ${s.status === 'Active' ? '#2ecc71' : '#e74c3c'}`
+                                    }}>
+                                        {s.status === 'Active' ? 'ACTIV' : 'EXPIRAT'}
+                                    </span>
+                                </td>
+
+                                <td data-label="Cursuri" style={{padding:'15px'}}>
+                                    <div style={{display:'flex', gap:'8px', flexWrap:'wrap'}}>
+                                        {s.enrolledClasses && s.enrolledClasses.length > 0 ? 
+                                            s.enrolledClasses.map(c => (
+                                                <div key={c.id} style={{
+                                                    background:'#f8f9fa', 
+                                                    border: '1px solid #ddd', 
+                                                    padding:'4px 8px', 
+                                                    borderRadius:'6px',
+                                                    display: 'flex',
+                                                    flexDirection: 'column'
+                                                }}>
+                                                    <span style={{fontSize:'0.85rem', fontWeight:'600'}}>{c.title}</span>
+                                                    <span style={{fontSize:'0.7rem', color:'#666'}}>
+                                                        Exp: {formatDateEU(c.expirationDate)}
+                                                    </span>
+                                                </div>
+                                            ))
+                                            : <span style={{color:'#ccc', fontSize:'0.8rem'}}>-</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td data-label="Acțiuni" style={{padding:'15px', textAlign:'center'}}>
+                                    <button className="btn" style={{background:'#2c3e50', color:'white', fontSize:'0.85rem', padding:'8px 16px'}} onClick={() => openInfoModal(s)}>
+                                        📂 Detalii
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
 
             {/* --- MODAL DETALII STUDENT --- */}
             {infoModalOpen && currentStudent && (
                 <div style={modalStyle}>
-                    <div style={modalContentStyle}>
+                    <div className="student-modal-content" style={modalContentStyle}>
                         
                         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', paddingBottom:'15px', borderBottom:'1px solid #eee'}}>
                             <div>
@@ -355,7 +623,7 @@ function StudentsView() {
                             <button onClick={() => setInfoModalOpen(false)} style={{fontSize:'1.5rem', background:'none', border:'none', cursor:'pointer'}}>&times;</button>
                         </div>
 
-                        <div style={{display:'flex', gap:'10px', marginBottom:'25px', background:'#f8f9fa', padding:'5px', borderRadius:'8px'}}>
+                        <div className="student-modal-tabs" style={{display:'flex', gap:'10px', marginBottom:'25px', background:'#f8f9fa', padding:'5px', borderRadius:'8px'}}>
                             <button style={activeTab === 'renewal' ? activeTabStyle : tabStyle} onClick={() => setActiveTab('renewal')}>💳 Reînnoire & Plăți</button>
                             <button style={activeTab === 'enroll' ? activeTabStyle : tabStyle} onClick={() => setActiveTab('enroll')}>📝 Înscrieri Cursuri</button>
                             <button style={activeTab === 'stats' ? activeTabStyle : tabStyle} onClick={() => {setActiveTab('stats'); fetchStats(currentStudent.id, 'MONTH')}}>📊 Prezență</button>
@@ -363,17 +631,38 @@ function StudentsView() {
                         </div>
 
                         {activeTab === 'renewal' && (
-                            <div style={{display:'grid', gridTemplateColumns:'1fr 1.2fr', gap:'20px'}}>
+                            <div className="student-renewal-grid" style={{display:'grid', gridTemplateColumns:'1fr 1.2fr', gap:'20px'}}>
                                 <div style={{background:'#f0f4f8', padding:'15px', borderRadius:'8px', height:'fit-content'}}>
-                                    <h4 style={{margin:'0 0 15px 0', color:'#2980b9', borderBottom:'1px solid #dae1e7', paddingBottom:'8px'}}>📜 Istoric Ultima Plată</h4>
-                                    <div style={{marginBottom:'15px'}}>
-                                        <label style={{fontSize:'0.75rem', color:'#7f8c8d', display:'block'}}>SUMA PLĂTITĂ ANTERIOR</label>
-                                        <div style={{fontSize:'1.4rem', fontWeight:'bold', color:'#2c3e50'}}>{currentStudent.lastPaymentAmount} RON</div>
-                                    </div>
-                                    <div style={{marginBottom:'15px'}}>
-                                        <label style={{fontSize:'0.75rem', color:'#7f8c8d', display:'block'}}>DETALII PLATĂ</label>
-                                        <div style={{fontSize:'0.9rem', fontStyle:'italic', color:'#34495e'}}>{currentStudent.lastPaymentComment || "Fără detalii."}</div>
-                                    </div>
+                                    <h4 style={{margin:'0 0 15px 0', color:'#2980b9', borderBottom:'1px solid #dae1e7', paddingBottom:'8px'}}>📜 Istoric Ultimele 3 Plăți</h4>
+                                    {recentPayments.length === 0 ? (
+                                        <div style={{color:'#7f8c8d', fontSize:'0.9rem'}}>Fără plăți înregistrate.</div>
+                                    ) : (
+                                        <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                                            {recentPayments.map(payment => (
+                                                <div key={payment.id} style={{background:'white', border:'1px solid #ddd', padding:'10px', borderRadius:'6px'}}>
+                                                    <div style={{display:'flex', justifyContent:'space-between', gap:'10px', marginBottom:'6px'}}>
+                                                        <div style={{fontSize:'0.8rem', color:'#7f8c8d'}}>{formatDateEU(payment.date)}</div>
+                                                        <div style={{fontSize:'0.8rem', color:'#7f8c8d', textTransform:'uppercase'}}>{payment.kind === 'renewal' ? 'Reînnoire' : 'Înscriere'}</div>
+                                                    </div>
+                                                    {payment.courses && payment.courses.length > 0 && (
+                                                        <div style={{fontSize:'0.85rem', fontWeight:'600', color:'#2c3e50', marginBottom:'6px'}}>
+                                                            {payment.courses.map(c => c.title).join(', ')}
+                                                        </div>
+                                                    )}
+                                                    <div style={{fontSize:'0.85rem', color:'#2c3e50'}}>Suma plătită: <strong>{payment.amountPaid} RON</strong></div>
+                                                    {payment.discountAmount > 0 && (
+                                                        <div style={{fontSize:'0.85rem', color:'#27ae60'}}>Discount: <strong>{payment.discountAmount} RON</strong></div>
+                                                    )}
+                                                    {payment.reasonNote && (
+                                                        <div style={{fontSize:'0.8rem', color:'#34495e', marginTop:'6px'}}>Motiv: {payment.reasonNote}</div>
+                                                    )}
+                                                    {payment.discountNote && (
+                                                        <div style={{fontSize:'0.8rem', color:'#34495e'}}>Motiv reducere: {payment.discountNote}</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div style={{border:'1px solid #e0e0e0', padding:'20px', borderRadius:'8px', background:'white'}}>
                                     <h4 style={{margin:'0 0 15px 0', color:'#27ae60'}}>💰 Reînnorire Abonament pe Curs</h4>
@@ -385,13 +674,16 @@ function StudentsView() {
                                                     <input type="checkbox" checked={renewalData.selectedCourseIds.includes(cls.id)} onChange={() => toggleCourseSelection(cls.id)} style={{marginTop:'2px'}} />
                                                     <div style={{flex:1}}>
                                                         <div style={{fontWeight:'500', fontSize:'0.95rem'}}>{cls.title}</div>
-                                                        {cls.expirationDate && <div style={{fontSize:'0.75rem', color:'#666', marginTop:'2px'}}>Data actuală: {cls.expirationDate}</div>}
+                                                        {cls.expirationDate && <div style={{fontSize:'0.75rem', color:'#666', marginTop:'2px'}}>Data actuală: {formatDateEU(cls.expirationDate)}</div>}
                                                     </div>
                                                 </label>
                                                 {renewalData.selectedCourseIds.includes(cls.id) && (
                                                     <div style={{marginLeft:'30px'}}>
                                                         <label style={{...labelStyle, fontSize:'0.8rem', marginBottom:'5px'}}>Expiră La (noua dată)</label>
-                                                        <input type="date" className="input-field" value={renewalData.courseExpirations[cls.id] || ''} onChange={e => setRenewalData({...renewalData, courseExpirations: {...renewalData.courseExpirations, [cls.id]: e.target.value}})} style={{borderColor:'#27ae60'}} />
+                                                        <input type="text" placeholder="dd.mm.yyyy" className="input-field" value={formatDateInput(renewalData.courseExpirations[cls.id] || '')} onChange={e => {
+                                                            const isoDate = formatDateToISO(e.target.value);
+                                                            setRenewalData({...renewalData, courseExpirations: {...renewalData.courseExpirations, [cls.id]: isoDate}});
+                                                        }} style={{borderColor:'#27ae60'}} />
                                                     </div>
                                                 )}
                                             </div>
@@ -401,8 +693,10 @@ function StudentsView() {
                                         <label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Suma (RON)</label>
                                         <input type="number" className="input-field" value={renewalData.amount} onChange={e => setRenewalData({...renewalData, amount: e.target.value})} style={{borderColor:'#27ae60'}} />
                                     </div>
-                                    <label style={labelStyle}>Notă / Motiv Reducere</label>
-                                    <textarea className="input-field" rows="2" value={renewalData.generatedComment} onChange={e => setRenewalData({...renewalData, generatedComment: e.target.value})} style={{fontSize:'0.85rem', resize:'none'}} />
+                                    <label style={labelStyle}>Notă / Motiv Reînnoire</label>
+                                    <textarea className="input-field" rows="2" value={renewalData.renewalNote} onChange={e => setRenewalData({...renewalData, renewalNote: e.target.value})} style={{fontSize:'0.85rem', resize:'none'}} />
+                                    <label style={{...labelStyle, marginTop:'10px'}}>Notă / Motiv Reducere</label>
+                                    <textarea className="input-field" rows="2" value={renewalData.discountNote} onChange={e => setRenewalData({...renewalData, discountNote: e.target.value})} style={{fontSize:'0.85rem', resize:'none'}} />
                                     <button onClick={handleRenewalSubmit} className="btn" style={{width:'100%', background:'#27ae60', color:'white', marginTop:'15px'}}>CONFIRMĂ PLATA</button>
                                 </div>
                             </div>
@@ -423,13 +717,20 @@ function StudentsView() {
                                 </div>
                                 <div style={{background:'#f8f9fa', padding:'25px', borderRadius:'10px', border:'2px dashed #ddd'}}>
                                     <h4 style={{margin:'0 0 20px 0', color:'var(--c-secondary)', display:'flex', alignItems:'center', gap:'10px'}}>
-                                        ✨ Înscrie la un Curs Nou & Configurează Plată
+                                         Înscrie la un Curs Nou & Configurează Plată
                                     </h4>
                                     {availableClasses.length > 0 ? (
-                                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                                        <div className="student-enroll-grid" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
                                             <div style={{gridColumn:'1 / -1'}}>
                                                 <label style={labelStyle}>Alege Cursul</label>
-                                                <select className="input-field" value={enrollmentData.classId} onChange={e => setEnrollmentData({...enrollmentData, classId: e.target.value})}>
+                                                <select className="input-field" value={enrollmentData.classId} onChange={e => {
+                                                    const selectedCourse = availableClasses.find(c => c.id === parseInt(e.target.value));
+                                                    setEnrollmentData({
+                                                        ...enrollmentData, 
+                                                        classId: e.target.value,
+                                                        enrollmentNote: selectedCourse ? `Înscriere student la cursul: ${selectedCourse.title}` : ''
+                                                    });
+                                                }}>
                                                     <option value="">-- Selectează Curs --</option>
                                                     {availableClasses.map(c => <option key={c.id} value={c.id}>{c.title} ({c.schedule})</option>)}
                                                 </select>
@@ -443,8 +744,12 @@ function StudentsView() {
                                                 <input type="date" className="input-field" value={enrollmentData.expirationDate} onChange={e => setEnrollmentData({...enrollmentData, expirationDate: e.target.value})} />
                                             </div>
                                             <div style={{gridColumn:'1 / -1'}}>
+                                                <label style={labelStyle}>Motiv Înscriere</label>
+                                                <input className="input-field" placeholder="Auto" value={enrollmentData.enrollmentNote} onChange={e => setEnrollmentData({...enrollmentData, enrollmentNote: e.target.value})} />
+                                            </div>
+                                            <div style={{gridColumn:'1 / -1'}}>
                                                 <label style={labelStyle}>Notă / Motiv Reducere</label>
-                                                <input className="input-field" placeholder="Opțional" value={enrollmentData.comment} onChange={e => setEnrollmentData({...enrollmentData, comment: e.target.value})} />
+                                                <input className="input-field" placeholder="Opțional" value={enrollmentData.discountNote} onChange={e => setEnrollmentData({...enrollmentData, discountNote: e.target.value})} />
                                             </div>
                                             <div style={{gridColumn:'1 / -1', textAlign:'right'}}>
                                                 <button className="btn btn-primary" onClick={handleEnrollWithPayment} style={{padding:'12px 30px', fontSize:'1rem'}}>Finalizează Înscrierea</button>
@@ -457,7 +762,7 @@ function StudentsView() {
 
                         {activeTab === 'stats' && (
                             <div>
-                                <div style={{display:'flex', gap:'10px', justifyContent:'center', marginBottom:'20px'}}>
+                                <div className="student-stats-filters" style={{display:'flex', gap:'10px', justifyContent:'center', marginBottom:'20px'}}>
                                     <button onClick={() => fetchStats(currentStudent.id, 'WEEK')} style={filterBtn}>Săptămână</button>
                                     <button onClick={() => fetchStats(currentStudent.id, 'MONTH')} style={{...filterBtn, background: 'var(--c-primary)', color:'white'}}>Lună</button>
                                 </div>
@@ -466,7 +771,7 @@ function StudentsView() {
                                         {/* Summary Section */}
                                         <div style={{background:'#f0f4f8', padding:'20px', borderRadius:'8px', marginBottom:'25px'}}>
                                             <h4 style={{margin:'0 0 15px 0', color:'#2c3e50', borderBottom:'2px solid #ddd', paddingBottom:'10px'}}>📊 Rezumat Prezență</h4>
-                                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                                            <div className="student-stats-summary" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
                                                 <div style={{textAlign:'center'}}>
                                                     <div style={{fontSize:'2.5rem', fontWeight:'bold', color:'#2ecc71', marginBottom:'5px'}}>{studentStats.coursesAttendedThisWeek || 0}</div>
                                                     <p style={{color:'#666', margin:0}}>Cursuri prezente <br/><span style={{fontSize:'0.85rem', color:'#999'}}>această săptămână</span></p>
@@ -523,7 +828,7 @@ function StudentsView() {
                         )}
 
                         {activeTab === 'profile' && (
-                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px'}}>
+                            <div className="student-profile-grid" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px'}}>
                                 <div><label style={labelStyle}>Prenume</label><input className="input-field" value={editingData.firstName} onChange={e => setEditingData({...editingData, firstName: e.target.value})} /></div>
                                 <div><label style={labelStyle}>Nume</label><input className="input-field" value={editingData.lastName} onChange={e => setEditingData({...editingData, lastName: e.target.value})} /></div>
                                 <div style={{gridColumn:'1/-1', textAlign:'right', marginTop:'15px'}}><button className="btn btn-primary" onClick={handleUpdateProfile}>Salvează Modificări</button></div>
@@ -536,9 +841,9 @@ function StudentsView() {
             {/* --- MODAL CREARE STUDENT --- */}
             {isCreateModalOpen && (
                 <div style={modalStyle}>
-                    <div style={{...modalContentStyle, maxWidth:'700px'}}>
+                    <div className="student-modal-content" style={{...modalContentStyle, maxWidth:'700px'}}>
                         <h2 style={{marginTop:0, borderBottom:'1px solid #eee', paddingBottom:'10px', color:'var(--c-primary)'}}>Înregistrare Student Nou</h2>
-                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px', marginTop:'15px'}}>
+                        <div className="student-create-grid" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px', marginTop:'15px'}}>
                             
                             {/* COLOANA 1: DATE PERSONALE */}
                             <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
@@ -583,7 +888,7 @@ function StudentsView() {
                                 {/* DATELE DE PLATĂ APAR DOAR DACĂ EXISTĂ CEL PUȚIN UN CURS SELECTAT */}
                                 {newStudent.enrolledClassIds.length > 0 && (
                                     <div style={{ borderTop: '1px solid #ddd', paddingTop: '10px' }}>
-                                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px'}}>
+                                        <div className="student-create-payment-grid" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px'}}>
                                             <div style={{display:'flex', flexDirection:'column'}}>
                                                 <label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Suma Achitată (RON)</label>
                                                 <input className="input-field" type="number" placeholder="0" value={newStudent.lastPaymentAmount} onChange={e => setNewStudent({...newStudent, lastPaymentAmount: e.target.value})} />
@@ -593,8 +898,10 @@ function StudentsView() {
                                                 <input className="input-field" type="date" value={newStudent.subscriptionExpirationDate} onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})} />
                                             </div>
                                         </div>
-                                        <label style={labelStyle}>Notă / Motiv Reducere</label>
-                                        <input className="input-field" placeholder="Ex: Reducere grup" value={newStudent.lastPaymentComment} onChange={e => setNewStudent({...newStudent, lastPaymentComment: e.target.value})} />
+                                        <label style={labelStyle}>Motiv Înscriere</label>
+                                        <input className="input-field" placeholder="Auto" value={newStudent.enrollmentNote} onChange={e => setNewStudent({...newStudent, enrollmentNote: e.target.value, lastPaymentComment: e.target.value})} />
+                                        <label style={{...labelStyle, marginTop:'10px'}}>Notă / Motiv Reducere</label>
+                                        <input className="input-field" placeholder="Ex: Reducere grup" value={newStudent.discountNote} onChange={e => setNewStudent({...newStudent, discountNote: e.target.value})} />
                                     </div>
                                 )}
                             </div>

@@ -14,9 +14,9 @@ function Dashboard() {
     };
 
     return (
-        <div style={{ minHeight: '100vh', display: 'flex' }}>
+        <div className="dashboard-layout" style={{ minHeight: '100vh', display: 'flex' }}>
             {/* Sidebar */}
-            <div style={{ width: '250px', backgroundColor: 'var(--c-primary)', color: 'white', padding: '20px', display: 'flex', flexDirection: 'column' }}>
+            <div className="dashboard-sidebar" style={{ width: '250px', backgroundColor: 'var(--c-primary)', color: 'white', padding: '20px', display: 'flex', flexDirection: 'column' }}>
                 <h2 style={{ color: 'var(--c-secondary)', marginBottom: '40px' }}>DXA Admin</h2>
                 
                 <button 
@@ -45,7 +45,7 @@ function Dashboard() {
             </div>
 
             {/* Content Area */}
-            <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
+            <div className="dashboard-content" style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
                 {activeTab === 'students' ? <StudentsView /> : <ClassesView />}
             </div>
         </div>

@@ -27,8 +27,8 @@ function Login() {
     };
 
     return (
-        <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: 'var(--c-primary)' }}>
-            <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', width: '400px', textAlign: 'center' }}>
+        <div className="login-page" style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: 'var(--c-primary)' }}>
+            <div className="login-card" style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', width: '400px', textAlign: 'center' }}>
                 <h2 style={{ color: 'var(--c-secondary)', marginBottom: '20px' }}>DXA Admin</h2>
                 {error && <p style={{ color: 'red' }}>{error}</p>}
                 <form onSubmit={handleLogin}>

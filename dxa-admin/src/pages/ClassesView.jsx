@@ -4,7 +4,7 @@ import './ClassesView.css';
 
 function ClassesView() {
     const [classes, setClasses] = useState([]);
-    const [selectedClass, setSelectedClass] = useState(null);
+    const [selectedOccurrence, setSelectedOccurrence] = useState(null);
     const [attendanceList, setAttendanceList] = useState([]); 
     
     // --- NAVIGARE SĂPTĂMÂNALĂ ---
@@ -12,7 +12,7 @@ function ClassesView() {
 
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [newClass, setNewClass] = useState({ 
-        title: '', description: '', scheduleDay: 'Luni', scheduleTime: '18:00', location: 'Sala Mare - 1' 
+        title: '', description: '', location: 'Sala Mare - 1', scheduleEntries: [{ day: 'Luni', time: '18:00' }] 
     });
 
     const DAYS = ["Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "Duminică"];
@@ -73,9 +73,9 @@ function ClassesView() {
         }
     };
 
-    const handleClassClick = (cls) => {
-        setSelectedClass(cls);
-        const dayIndex = DAYS.indexOf(getDayFromSchedule(cls.schedule)); 
+    const handleClassClick = (cls, entry) => {
+        setSelectedOccurrence({ cls, day: entry.day, time: entry.time });
+        const dayIndex = DAYS.indexOf(entry.day); 
         if (dayIndex !== -1) {
             const specificDate = addDays(currentWeekStart, dayIndex);
             const formattedDate = formatDateISO(specificDate);
@@ -85,14 +85,14 @@ function ClassesView() {
 
     // 4. Toggle Prezență
     const handleToggleParticipation = async (studentId, currentStatus) => {
-        if (!selectedClass) return;
+        if (!selectedOccurrence) return;
 
-        const dayIndex = DAYS.indexOf(getDayFromSchedule(selectedClass.schedule));
+        const dayIndex = DAYS.indexOf(selectedOccurrence.day);
         const specificDate = formatDateISO(addDays(currentWeekStart, dayIndex));
 
         const payload = {
             studentId: studentId,
-            classId: selectedClass.id,
+            classId: selectedOccurrence.cls.id,
             date: specificDate,
             present: !currentStatus
         };
@@ -134,18 +134,36 @@ function ClassesView() {
         return date.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' });
     }
 
-    function getDayFromSchedule(schedule) {
-        if(!schedule) return "";
-        for (const day of DAYS) {
-            if (schedule.includes(day)) return day;
-        }
-        return "";
+    function parseScheduleEntries(schedule) {
+        if (!schedule) return [];
+        return schedule
+            .split(';')
+            .map(part => part.trim())
+            .filter(Boolean)
+            .map(part => {
+                const day = DAYS.find(d => part.startsWith(d));
+                if (!day) return null;
+                const time = part.replace(day, '').trim();
+                return { day, time };
+            })
+            .filter(Boolean);
+    }
+
+    function buildScheduleString(entries) {
+        return entries
+            .map(entry => `${entry.day} ${entry.time}`.trim())
+            .join('; ');
     }
 
     const handleCreate = async () => {
-        const fullSchedule = `${newClass.scheduleDay} ${newClass.scheduleTime}`;
+        const fullSchedule = buildScheduleString(newClass.scheduleEntries);
         try {
-            await api.post('/admin/classes', { ...newClass, schedule: fullSchedule });
+            await api.post('/admin/classes', {
+                title: newClass.title,
+                description: newClass.description,
+                location: newClass.location,
+                schedule: fullSchedule
+            });
             setIsAddModalOpen(false);
             fetchClasses();
             alert("Curs adăugat!");
@@ -154,8 +172,31 @@ function ClassesView() {
 
     const handleDelete = async (id) => {
         if(!window.confirm("Ștergi cursul?")) return;
-        try { await api.delete(`/admin/classes/${id}`); setSelectedClass(null); fetchClasses(); } 
+        try { await api.delete(`/admin/classes/${id}`); setSelectedOccurrence(null); fetchClasses(); } 
         catch (e) { alert("Eroare la ștergere."); }
+    };
+
+    const addScheduleEntry = () => {
+        setNewClass(prev => ({
+            ...prev,
+            scheduleEntries: [...prev.scheduleEntries, { day: 'Luni', time: '18:00' }]
+        }));
+    };
+
+    const updateScheduleEntry = (index, field, value) => {
+        setNewClass(prev => ({
+            ...prev,
+            scheduleEntries: prev.scheduleEntries.map((entry, i) =>
+                i === index ? { ...entry, [field]: value } : entry
+            )
+        }));
+    };
+
+    const removeScheduleEntry = (index) => {
+        setNewClass(prev => ({
+            ...prev,
+            scheduleEntries: prev.scheduleEntries.filter((_, i) => i !== index)
+        }));
     };
 
     const weekEnd = addDays(currentWeekStart, 6);
@@ -164,10 +205,10 @@ function ClassesView() {
         <div className="schedule-section">
             
             {/* HEADER NAVIGARE SĂPTĂMÂNĂ */}
-            <div style={{ marginBottom: '30px', display:'flex', flexDirection:'column', alignItems:'center' }}>
+            <div className="classes-header" style={{ marginBottom: '30px', display:'flex', flexDirection:'column', alignItems:'center' }}>
                 <h1 style={{margin:0, color:'var(--c-primary)', marginBottom:'15px'}}>Prezență & Orar</h1>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', background:'white', padding:'10px 20px', borderRadius:'50px', boxShadow:'0 2px 10px rgba(0,0,0,0.1)' }}>
+                <div className="classes-week-nav" style={{ display: 'flex', alignItems: 'center', gap: '15px', background:'white', padding:'10px 20px', borderRadius:'50px', boxShadow:'0 2px 10px rgba(0,0,0,0.1)' }}>
                     <button className="btn" onClick={goToPrevWeek} style={{color: 'black'}}>&lt;</button>
                     <div style={{textAlign:'center'}}>
                         <span style={{display:'block', fontSize:'0.8rem', color:'#888', fontWeight:'bold'}}>SĂPTĂMÂNA</span>
@@ -200,11 +241,17 @@ function ClassesView() {
                                         </span>
                                     </h4>
                                     <div className="class-list">
-                                        {classes.filter(c => c.location === hall && c.schedule.includes(day))
-                                            .sort((a, b) => a.schedule.localeCompare(b.schedule))
-                                            .map(cls => (
-                                                <div key={cls.id} className="class-card" onClick={() => handleClassClick(cls)}>
-                                                    <span className="class-time">{cls.schedule.replace(day, '').trim()}</span>
+                                        {classes
+                                            .filter(c => c.location === hall)
+                                            .flatMap(cls => (
+                                                parseScheduleEntries(cls.schedule)
+                                                    .filter(entry => entry.day === day)
+                                                    .map(entry => ({ cls, entry }))
+                                            ))
+                                            .sort((a, b) => a.entry.time.localeCompare(b.entry.time))
+                                            .map(({ cls, entry }) => (
+                                                <div key={`${cls.id}-${entry.day}-${entry.time}`} className="class-card" onClick={() => handleClassClick(cls, entry)}>
+                                                    <span className="class-time">{entry.time}</span>
                                                     <p className="class-name">{cls.title}</p>
                                                     <div style={{fontSize:'0.7rem', color:'#999'}}>Click pentru Prezență</div>
                                                 </div>
@@ -219,14 +266,15 @@ function ClassesView() {
             ))}
 
             {/* MODAL PREZENȚĂ - DESIGN ORIGINAL CU DATE INDIVIDUALE */}
-            {selectedClass && (
-                <div className="modal-overlay" onClick={() => setSelectedClass(null)}>
+            {selectedOccurrence && (
+                <div className="modal-overlay" onClick={() => setSelectedOccurrence(null)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <button className="modal-close-btn" onClick={() => setSelectedClass(null)}>&times;</button>
+                        <button className="modal-close-btn" onClick={() => setSelectedOccurrence(null)}>&times;</button>
                         
-                        <h2 style={{color:'var(--c-secondary)', marginBottom:'5px'}}>{selectedClass.title}</h2>
+                        <h2 style={{color:'var(--c-secondary)', marginBottom:'5px'}}>{selectedOccurrence.cls.title}</h2>
                         <p style={{fontWeight:'bold', color:'#666', marginBottom:'20px'}}>
-                            Data: {formatDateRO(addDays(currentWeekStart, DAYS.indexOf(getDayFromSchedule(selectedClass.schedule))))}
+                            Data: {formatDateRO(addDays(currentWeekStart, DAYS.indexOf(selectedOccurrence.day)))}
+                            {selectedOccurrence.time ? ` • Ora ${selectedOccurrence.time}` : ''}
                         </p>
 
                         <div style={{background:'#f9f9f9', padding:'15px', borderRadius:'8px', maxHeight:'400px', overflowY:'auto'}}>
@@ -264,7 +312,7 @@ function ClassesView() {
                         </div>
                         
                         <div style={{marginTop:'20px', textAlign:'right'}}>
-                             <button className="btn btn-danger" style={{fontSize:'0.8rem'}} onClick={() => handleDelete(selectedClass.id)}>
+                             <button className="btn btn-danger" style={{fontSize:'0.8rem'}} onClick={() => handleDelete(selectedOccurrence.cls.id)}>
                                 Șterge Cursul din Orar
                             </button>
                         </div>
@@ -283,11 +331,30 @@ function ClassesView() {
                             <select className="input-field" value={newClass.location} onChange={e => setNewClass({...newClass, location: e.target.value})}>
                                 {HALLS.map(h => <option key={h} value={h}>{h}</option>)}
                             </select>
-                            <div style={{display:'flex', gap:'10px'}}>
-                                <select className="input-field" value={newClass.scheduleDay} onChange={e => setNewClass({...newClass, scheduleDay: e.target.value})}>
-                                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-                                </select>
-                                <input type="time" className="input-field" value={newClass.scheduleTime} onChange={e => setNewClass({...newClass, scheduleTime: e.target.value})} />
+                            {newClass.scheduleEntries.map((entry, index) => (
+                                <div key={`${entry.day}-${index}`} style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                                    <select
+                                        className="input-field"
+                                        value={entry.day}
+                                        onChange={e => updateScheduleEntry(index, 'day', e.target.value)}
+                                    >
+                                        {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                    <input
+                                        type="time"
+                                        className="input-field"
+                                        value={entry.time}
+                                        onChange={e => updateScheduleEntry(index, 'time', e.target.value)}
+                                    />
+                                    {newClass.scheduleEntries.length > 1 && (
+                                        <button className="btn btn-danger" style={{padding:'6px 10px'}} onClick={() => removeScheduleEntry(index)}>
+                                            X
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            <div style={{textAlign:'left'}}>
+                                <button className="btn" onClick={addScheduleEntry}>+ Adaugă zi</button>
                             </div>
                             <div style={{display:'flex', justifyContent:'flex-end', gap:'10px'}}>
                                 <button className="btn btn-danger" onClick={() => setIsAddModalOpen(false)}>Anulează</button>

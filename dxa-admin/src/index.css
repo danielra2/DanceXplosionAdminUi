@@ -45,3 +45,171 @@ button {
   margin-bottom: 10px;
   font-family: 'Georgia', serif;
 }
+
+/* Responsive overrides - keep desktop design unchanged */
+@media (max-width: 1024px) {
+  #root {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 900px) {
+  #root {
+    padding: 1rem;
+  }
+
+  .dashboard-layout {
+    flex-direction: column !important;
+  }
+
+  .dashboard-sidebar {
+    width: 100% !important;
+    padding: 16px !important;
+  }
+
+  .dashboard-content {
+    padding: 24px !important;
+  }
+
+  .students-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px;
+  }
+
+  .students-table-wrap {
+    overflow-x: auto;
+  }
+
+  .students-table-wrap table {
+    min-width: 720px;
+  }
+
+  .student-modal-tabs {
+    flex-wrap: wrap !important;
+  }
+
+  .student-renewal-grid,
+  .student-enroll-grid,
+  .student-stats-summary,
+  .student-profile-grid,
+  .student-create-grid,
+  .student-create-payment-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .student-modal-content {
+    padding: 20px !important;
+  }
+
+  .student-stats-filters {
+    flex-wrap: wrap !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .btn {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .classes-week-nav {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+  }
+
+  .classes-header {
+    padding: 0 10px;
+  }
+
+  .schedule-section {
+    padding: 10px;
+  }
+
+  .students-filters {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .students-filters .btn {
+    width: 100%;
+  }
+
+  .dashboard-content {
+    padding: 16px !important;
+  }
+
+  .students-table-wrap {
+    overflow-x: visible;
+  }
+
+  .students-table-wrap table {
+    min-width: 0;
+  }
+
+  .students-table-wrap thead {
+    display: none;
+  }
+
+  .students-table-wrap tbody,
+  .students-table-wrap tr,
+  .students-table-wrap td {
+    display: block;
+    width: 100%;
+  }
+
+  .students-table-wrap tr {
+    background: white;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+
+  .students-table-wrap td {
+    padding: 10px 0 !important;
+    border: none !important;
+  }
+
+  .students-table-wrap td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #888;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .students-table-wrap td[data-label="Acțiuni"] {
+    text-align: center !important;
+  }
+
+  .students-table-wrap td[data-label="Acțiuni"] .btn {
+    width: 92%;
+    margin: 0 auto;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .login-page {
+    padding: 20px;
+  }
+
+  .login-card {
+    width: 90% !important;
+    padding: 24px !important;
+  }
+}
