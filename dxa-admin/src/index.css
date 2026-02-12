@@ -44,7 +44,18 @@ button {
   width: 100%;
   margin-bottom: 10px;
   font-family: 'Georgia', serif;
+  box-sizing: border-box;
 }
+
+.student-create-grid,
+.student-create-payment-grid {
+  align-items: start;
+}
+
+.student-create-payment-grid .input-field {
+  margin-bottom: 0;
+}
+
 
 /* Responsive overrides - keep desktop design unchanged */
 @media (max-width: 1024px) {
@@ -188,8 +199,10 @@ button {
   }
 
   .students-table-wrap td[data-label="Acțiuni"] .btn {
+    display: block;
     width: 92%;
-    margin: 0 auto;
+    margin-left: auto;
+    margin-right: auto;
     padding: 6px 12px;
     font-size: 0.8rem;
     box-sizing: border-box;

@@ -130,8 +130,13 @@ function ClassesView() {
         return date.toISOString().split('T')[0];
     }
 
-    function formatDateRO(date) {
-        return date.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' });
+    function formatDateEU(date) {
+        if (!date) return '';
+        const d = new Date(date);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}.${month}.${year}`;
     }
 
     function parseScheduleEntries(schedule) {
@@ -213,7 +218,7 @@ function ClassesView() {
                     <div style={{textAlign:'center'}}>
                         <span style={{display:'block', fontSize:'0.8rem', color:'#888', fontWeight:'bold'}}>SĂPTĂMÂNA</span>
                         <span style={{fontSize:'1.1rem', fontWeight:'bold', color:'var(--c-secondary)'}}>
-                            {formatDateRO(currentWeekStart)} - {formatDateRO(weekEnd)}
+                            {formatDateEU(currentWeekStart)} - {formatDateEU(weekEnd)}
                         </span>
                     </div>
                     <button className="btn" onClick={goToNextWeek} style={{color: 'black'}}>&gt;</button>
@@ -237,7 +242,7 @@ function ClassesView() {
                                     <h4 className="day-title">
                                         {day} <br/>
                                         <span style={{fontSize:'0.8rem', fontWeight:'normal', opacity:0.8}}>
-                                            {formatDateRO(currentDayDate)}
+                                            {formatDateEU(currentDayDate)}
                                         </span>
                                     </h4>
                                     <div className="class-list">
@@ -273,7 +278,7 @@ function ClassesView() {
                         
                         <h2 style={{color:'var(--c-secondary)', marginBottom:'5px'}}>{selectedOccurrence.cls.title}</h2>
                         <p style={{fontWeight:'bold', color:'#666', marginBottom:'20px'}}>
-                            Data: {formatDateRO(addDays(currentWeekStart, DAYS.indexOf(selectedOccurrence.day)))}
+                            Data: {formatDateEU(addDays(currentWeekStart, DAYS.indexOf(selectedOccurrence.day)))}
                             {selectedOccurrence.time ? ` • Ora ${selectedOccurrence.time}` : ''}
                         </p>
 
@@ -289,7 +294,7 @@ function ClassesView() {
                                             {/* AFISARE DATA EXPIRARE INDIVIDUALĂ SUB NUME */}
                                             {student.expirationDate && (
                                                 <div style={{fontSize:'0.7rem', color: new Date(student.expirationDate) < new Date() ? '#e74c3c' : '#888'}}>
-                                                    Expiră la: {student.expirationDate}
+                                                    Expiră la: {formatDateEU(student.expirationDate)}
                                                 </div>
                                             )}
                                         </div>

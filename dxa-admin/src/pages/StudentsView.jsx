@@ -69,6 +69,29 @@ function StudentsView() {
     };
     useEffect(() => { fetchData(); }, []);
 
+    const applyLocalFilters = (list) => {
+        let filtered = Array.isArray(list) ? [...list] : [];
+        if (filters.search) {
+            const term = filters.search.trim().toLowerCase();
+            filtered = filtered.filter(s =>
+                `${s.firstName || ''} ${s.lastName || ''}`.toLowerCase().includes(term) ||
+                (s.email || '').toLowerCase().includes(term) ||
+                (s.phone || '').toLowerCase().includes(term)
+            );
+        }
+        if (filters.status) {
+            const status = filters.status.toLowerCase();
+            filtered = filtered.filter(s => (s.status || '').toLowerCase() === status);
+        }
+        if (filters.courseId) {
+            const courseId = parseInt(filters.courseId, 10);
+            filtered = filtered.filter(s =>
+                Array.isArray(s.enrolledClasses) && s.enrolledClasses.some(c => c.id === courseId)
+            );
+        }
+        return filtered;
+    };
+
     const fetchFilteredUsers = async () => {
         try {
             const params = new URLSearchParams();
@@ -76,7 +99,8 @@ function StudentsView() {
             if (filters.status) params.append('status', filters.status);
             if (filters.courseId) params.append('courseId', filters.courseId);
             const response = await api.get(`/users?${params.toString()}`);
-            setStudents(response.data.userList || response.data);
+            const list = response.data.userList || response.data;
+            setStudents(applyLocalFilters(list));
         } catch (error) { alert("Nu pot încărca studenții."); }
     };
 
@@ -293,9 +317,10 @@ function StudentsView() {
         if (!enrollmentData.classId || !enrollmentData.expirationDate) {
             alert("Selectează cursul și data de expirare."); return;
         }
+        const expirationDate = enrollmentData.expirationDate;
 
         try {
-            await api.post(`/admin/enrollments/student/${currentStudent.id}/class/${enrollmentData.classId}?expirationDate=${enrollmentData.expirationDate}`);
+            await api.post(`/admin/enrollments/student/${currentStudent.id}/class/${enrollmentData.classId}?expirationDate=${expirationDate}`);
             const selectedClassName = classes.find(c => c.id === parseInt(enrollmentData.classId))?.title;
             const finalEnrollmentNote = enrollmentData.enrollmentNote || `Înscriere student la cursul: ${selectedClassName}`;
             const amountPaid = parseAmount(enrollmentData.amount);
@@ -323,7 +348,7 @@ function StudentsView() {
             setPaymentHistory(updatedHistory);
 
             const paymentPayload = {
-                subscriptionExpirationDate: enrollmentData.expirationDate,
+                subscriptionExpirationDate: expirationDate,
                 lastPaymentAmount: amountPaid,
                 lastPaymentComment: finalEnrollmentNote
             };
@@ -447,21 +472,9 @@ function StudentsView() {
     // CONVERTIRE YYYY-MM-DD la dd.mm.yyyy
     const formatDateInput = (dateString) => {
         if (!dateString) return '';
-        const parts = dateString.split('-');
-        if (parts.length === 3) {
-            return `${parts[2]}.${parts[1]}.${parts[0]}`;
-        }
-        return dateString;
-    };
-
-    // CONVERTIRE dd.mm.yyyy la YYYY-MM-DD
-    const formatDateToISO = (dateString) => {
-        if (!dateString) return '';
-        const parts = dateString.split('.');
-        if (parts.length === 3) {
-            return `${parts[2]}-${parts[1]}-${parts[0]}`;
-        }
-        return dateString;
+        const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toISOString().split('T')[0];
     };
 
     const parseAmount = (value) => {
@@ -539,6 +552,30 @@ function StudentsView() {
             <div className="students-filters" style={{ backgroundColor: 'white', padding: '20px', borderRadius: '10px', display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '25px', alignItems:'flex-end', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' }}>
                 <div style={{flex:1, minWidth:'200px'}}><label style={labelStyle}>Nume</label><input className="input-field" placeholder="Căutare..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} style={{margin:0}}/></div>
                 <div style={{flex:1, minWidth:'150px'}}><label style={labelStyle}>Status</label><select className="input-field" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} style={{margin:0}}><option value="">Toți</option><option value="Active">Activ</option><option value="Inactive">Inactiv</option></select></div>
+                <div style={{flex:1, minWidth:'180px'}}>
+                    <label style={labelStyle}>Sortare</label>
+                    <select
+                        className="input-field"
+                        value={sortBy ? `${sortBy}:${sortOrder}` : ''}
+                        onChange={e => {
+                            const [column, order] = e.target.value.split(':');
+                            if (!column) {
+                                setSortBy(null);
+                                setSortOrder('asc');
+                                return;
+                            }
+                            setSortBy(column);
+                            setSortOrder(order || 'asc');
+                        }}
+                        style={{margin:0}}
+                    >
+                        <option value="">Fără sortare</option>
+                        <option value="student:asc">Nume A-Z</option>
+                        <option value="student:desc">Nume Z-A</option>
+                        <option value="courses:asc">Expirare apropiată</option>
+                        <option value="courses:desc">Expirare îndepărtată</option>
+                    </select>
+                </div>
                 <button className="btn btn-primary" onClick={fetchFilteredUsers}>🔍 Caută</button>
                 <button className="btn" style={{background:'#95a5a6', color:'white'}} onClick={handleResetFilters}>Reset</button>
             </div>
@@ -680,10 +717,16 @@ function StudentsView() {
                                                 {renewalData.selectedCourseIds.includes(cls.id) && (
                                                     <div style={{marginLeft:'30px'}}>
                                                         <label style={{...labelStyle, fontSize:'0.8rem', marginBottom:'5px'}}>Expiră La (noua dată)</label>
-                                                        <input type="text" placeholder="dd.mm.yyyy" className="input-field" value={formatDateInput(renewalData.courseExpirations[cls.id] || '')} onChange={e => {
-                                                            const isoDate = formatDateToISO(e.target.value);
-                                                            setRenewalData({...renewalData, courseExpirations: {...renewalData.courseExpirations, [cls.id]: isoDate}});
-                                                        }} style={{borderColor:'#27ae60'}} />
+                                                        <input
+                                                            type="date"
+                                                            lang="ro-RO"
+                                                            className="input-field"
+                                                            value={formatDateInput(renewalData.courseExpirations[cls.id])}
+                                                            onChange={e => {
+                                                                const isoDate = e.target.value;
+                                                                setRenewalData({...renewalData, courseExpirations: {...renewalData.courseExpirations, [cls.id]: isoDate}});
+                                                            }}
+                                                        />
                                                     </div>
                                                 )}
                                             </div>
@@ -741,7 +784,13 @@ function StudentsView() {
                                             </div>
                                             <div style={{display:'flex', flexDirection:'column'}}>
                                                 <label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Valabil Până La</label>
-                                                <input type="date" className="input-field" value={enrollmentData.expirationDate} onChange={e => setEnrollmentData({...enrollmentData, expirationDate: e.target.value})} />
+                                                <input
+                                                    type="date"
+                                                    lang="ro-RO"
+                                                    className="input-field"
+                                                    value={formatDateInput(enrollmentData.expirationDate)}
+                                                    onChange={e => setEnrollmentData({...enrollmentData, expirationDate: e.target.value})}
+                                                />
                                             </div>
                                             <div style={{gridColumn:'1 / -1'}}>
                                                 <label style={labelStyle}>Motiv Înscriere</label>
@@ -806,7 +855,7 @@ function StudentsView() {
                                                                         <div style={{display:'flex', flexWrap:'wrap', gap:'8px'}}>
                                                                             {course.attendanceDates.map((date, i) => (
                                                                                 <span key={i} style={{background:'#e8f5e9', color:'#2ecc71', padding:'4px 10px', borderRadius:'4px', fontSize:'0.8rem', fontWeight:'500'}}>
-                                                                                    {new Date(date).toLocaleDateString('ro-RO', {day:'numeric', month:'short'})}
+                                                                                    {formatDateEU(date)}
                                                                                 </span>
                                                                             ))}
                                                                         </div>
@@ -895,7 +944,13 @@ function StudentsView() {
                                             </div>
                                             <div style={{display:'flex', flexDirection:'column'}}>
                                                 <label style={{...labelStyle, minHeight:'40px', lineHeight:'1.3'}}>Expiră La</label>
-                                                <input className="input-field" type="date" value={newStudent.subscriptionExpirationDate} onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})} />
+                                                <input
+                                                    className="input-field"
+                                                    type="date"
+                                                    lang="ro-RO"
+                                                    value={formatDateInput(newStudent.subscriptionExpirationDate)}
+                                                    onChange={e => setNewStudent({...newStudent, subscriptionExpirationDate: e.target.value})}
+                                                />
                                             </div>
                                         </div>
                                         <label style={labelStyle}>Motiv Înscriere</label>
